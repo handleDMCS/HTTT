@@ -545,11 +545,18 @@ textarea:focus {
 }
 
 .detail-tabs button,
-.icon-label {
+.icon-label,
+.role-label {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
+}
+
+.role-label {
+	width: fit-content;
+	justify-content: flex-start;
+	gap: 5px;
 }
 
 .detail-tabs button {

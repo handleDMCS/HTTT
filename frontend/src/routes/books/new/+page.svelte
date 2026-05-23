@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { ArrowLeft, Save } from '@lucide/svelte';
 	import {
 		apiFetch,
 		getStoredMember,
@@ -99,7 +100,7 @@
 	<section class="form-shell">
 		<div class="form-header">
 			<button class="icon-button" type="button" aria-label="Back to books" onclick={() => goto('/books')}>
-				&lt;
+				<ArrowLeft size={21} />
 			</button>
 			<div>
 				<p class="eyebrow">{mode === 'edit' ? 'Edit listing' : 'New listing'}</p>
@@ -164,7 +165,10 @@
 				<p class="form-error">{error}</p>
 			{/if}
 
-			<button class="primary-action" disabled={loading} type="submit">
+			<button class="primary-action icon-label" disabled={loading} type="submit">
+				{#if !loading}
+					<Save size={18} />
+				{/if}
 				{loading ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Create listing'}
 			</button>
 		</form>

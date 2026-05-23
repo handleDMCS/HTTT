@@ -40,6 +40,7 @@ export type Transaction = {
 	requester_confirmed: boolean;
 	locked: boolean;
 	points_applied: boolean;
+	archived: boolean;
 };
 
 export type ChatMessage = {

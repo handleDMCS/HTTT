@@ -88,6 +88,7 @@ class ExchangeTransaction(SQLModel, table=True):
     requester_confirmed: bool = False
     locked: bool = False
     points_applied: bool = False
+    archived: bool = False
 
 
 class TransactionCreate(SQLModel):
@@ -425,6 +426,8 @@ def ensure_open_chatbox(transaction: ExchangeTransaction) -> None:
     output:
     * None
     """
+    if transaction.archived:
+        raise HTTPException(status_code=400, detail="Chatbox is archived")
     if transaction.locked:
         raise HTTPException(status_code=400, detail="Chatbox is locked")
 
@@ -485,6 +488,9 @@ def migrate_schema() -> None:
         if table_exists(connection, "exchangetransaction"):
             legacy_transaction_columns = get_table_columns(connection, "exchangetransaction")
             if table_exists(connection, "transactions"):
+                target_transaction_columns = get_table_columns(connection, "transactions")
+                if "archived" not in target_transaction_columns:
+                    connection.execute(text("ALTER TABLE transactions ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"))
                 requester_select = "requester_id" if "requester_id" in legacy_transaction_columns else "NULL"
                 courier_select = "courier_id" if "courier_id" in legacy_transaction_columns else "NULL"
                 owner_confirmed_select = "owner_confirmed" if "owner_confirmed" in legacy_transaction_columns else "0"
@@ -492,6 +498,7 @@ def migrate_schema() -> None:
                     "requester_confirmed" if "requester_confirmed" in legacy_transaction_columns else "0"
                 )
                 points_applied_select = "points_applied" if "points_applied" in legacy_transaction_columns else "0"
+                archived_select = "archived" if "archived" in legacy_transaction_columns else points_applied_select
                 locked_select = "locked" if "locked" in legacy_transaction_columns else "0"
                 connection.execute(
                     text(
@@ -506,7 +513,8 @@ def migrate_schema() -> None:
                             owner_confirmed,
                             requester_confirmed,
                             locked,
-                            points_applied
+                            points_applied,
+                            archived
                         )
                         SELECT
                             id,
@@ -518,7 +526,8 @@ def migrate_schema() -> None:
                             {owner_confirmed_select},
                             {requester_confirmed_select},
                             {locked_select},
-                            {points_applied_select}
+                            {points_applied_select},
+                            {archived_select}
                         FROM exchangetransaction
                         """
                     )
@@ -535,6 +544,7 @@ def migrate_schema() -> None:
             or "note" in transaction_columns
             or "status" in transaction_columns
             or "locked" not in transaction_columns
+            or "archived" not in transaction_columns
         )
         if not needs_transaction_rebuild:
             return
@@ -554,6 +564,7 @@ def migrate_schema() -> None:
                     requester_confirmed BOOLEAN NOT NULL,
                     locked BOOLEAN NOT NULL,
                     points_applied BOOLEAN NOT NULL,
+                    archived BOOLEAN NOT NULL,
                     PRIMARY KEY (id),
                     FOREIGN KEY(book_id) REFERENCES book (id),
                     FOREIGN KEY(owner_id) REFERENCES member (id),
@@ -568,6 +579,7 @@ def migrate_schema() -> None:
         owner_confirmed_select = "owner_confirmed" if "owner_confirmed" in transaction_columns else "0"
         requester_confirmed_select = "requester_confirmed" if "requester_confirmed" in transaction_columns else "0"
         points_applied_select = "points_applied" if "points_applied" in transaction_columns else "0"
+        archived_select = "archived" if "archived" in transaction_columns else points_applied_select
         locked_select = "locked" if "locked" in transaction_columns else "0"
         connection.execute(
             text(
@@ -582,7 +594,8 @@ def migrate_schema() -> None:
                     owner_confirmed,
                     requester_confirmed,
                     locked,
-                    points_applied
+                    points_applied,
+                    archived
                 )
                 SELECT
                     id,
@@ -594,7 +607,8 @@ def migrate_schema() -> None:
                     {owner_confirmed_select},
                     {requester_confirmed_select},
                     {locked_select},
-                    {points_applied_select}
+                    {points_applied_select},
+                    {archived_select}
                 FROM transactions_old
                 """
             )
@@ -743,6 +757,7 @@ def transaction_to_dict(
         "requester_confirmed": transaction.requester_confirmed,
         "locked": transaction.locked,
         "points_applied": transaction.points_applied,
+        "archived": transaction.archived,
         "owner_points_delta": point_value,
         "requester_points_delta": -point_value,
         "courier_points_delta": 2 if courier else 0,
@@ -777,23 +792,11 @@ def complete_transaction_if_ready(session: Session, transaction: ExchangeTransac
         session.add(courier)
 
     transaction.points_applied = True
+    transaction.archived = True
+    transaction.locked = True
     session.add(owner)
     session.add(requester)
     session.add(transaction)
-
-
-def delete_chatbox_messages(session: Session, transaction_id: int) -> None:
-    """
-    tl;dr: Delete all messages for a finished chatbox.
-    input:
-    * session: active database session
-    * transaction_id: chatbox transaction id
-    output:
-    * None
-    """
-    messages = session.exec(select(Message).where(Message.transaction_id == transaction_id)).all()
-    for message in messages:
-        session.delete(message)
 
 
 @app.on_event("startup")
@@ -1053,6 +1056,16 @@ def create_transaction(payload: TransactionCreate) -> dict:
     with Session(engine) as session:
         book = get_book(session, payload.book_id)
         owner = get_member(session, book.owner_id)
+        existing = session.exec(
+            select(ExchangeTransaction).where(
+                ExchangeTransaction.book_id == book.id,
+                ExchangeTransaction.archived == False,
+            )
+        ).first()
+        if existing:
+            requester = get_member(session, existing.requester_id) if existing.requester_id else None
+            courier = get_member(session, existing.courier_id) if existing.courier_id else None
+            return transaction_to_dict(existing, book, owner, requester, courier)
         transaction = ExchangeTransaction(
             book_id=book.id,
             owner_id=owner.id,
@@ -1103,6 +1116,8 @@ def create_chat_message(transaction_id: int, payload: ChatMessageCreate) -> dict
     """
     with Session(engine) as session:
         transaction = get_transaction(session, transaction_id)
+        if transaction.archived:
+            raise HTTPException(status_code=400, detail="Chatbox is archived")
         member = get_member(session, payload.user_id)
         role = member_role_in_transaction(session, transaction, payload.user_id)
         if role is None:
@@ -1315,6 +1330,8 @@ def confirm_meeting(payload: MeetingConfirm) -> dict:
     """
     with Session(engine) as session:
         transaction = get_transaction(session, payload.transaction_id)
+        if transaction.archived:
+            raise HTTPException(status_code=400, detail="Transaction is archived")
         user_ids = {payload.user_1_id, payload.user_2_id}
         expected_owner_handoff = {transaction.owner_id, transaction.courier_id}
         expected_direct_handoff = {transaction.owner_id, transaction.requester_id}
@@ -1339,7 +1356,6 @@ def confirm_meeting(payload: MeetingConfirm) -> dict:
 
         complete_transaction_if_ready(session, transaction)
         if transaction.points_applied:
-            delete_chatbox_messages(session, transaction.id)
             book = get_book(session, transaction.book_id)
             book.available = False
             session.add(book)

@@ -3,13 +3,19 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import {
+		ArrowLeft,
 		BookOpen,
 		Check,
 		ClipboardList,
+		Crown,
+		Handshake,
 		LogOut,
 		MessageCircle,
 		QrCode,
 		Send,
+		Truck,
+		User,
+		UserMinus,
 		type Icon
 	} from '@lucide/svelte';
 	import {
@@ -26,6 +32,8 @@
 
 	type DetailTab = 'info' | 'chat' | 'pending';
 	type Role = 'requester' | 'courier';
+	type RoleName = 'owner' | Role;
+	const REALTIME_REFRESH_MS = 1800;
 
 	let member = $state<Member | null>(null);
 	let book = $state<Book | null>(null);
@@ -38,10 +46,14 @@
 	let applyRole = $state<Role>('requester');
 	let applyMessage = $state('');
 	let chatMessage = $state('');
+	let realtimeTimer: ReturnType<typeof setInterval> | null = null;
+	let realtimeRefreshInFlight = false;
 
 	let viewChatbox = $derived(page.url.searchParams.get('view_chatbox') === 'true');
+	let routeTransactionId = $derived(Number(page.url.searchParams.get('transaction_id')) || null);
 	let isOwner = $derived(!!member && !!book && member.id === book.owner_id);
-	let acceptedRole = $derived<Role | 'owner' | null>(
+	let readOnly = $derived(!!transaction?.archived);
+	let acceptedRole = $derived<RoleName | null>(
 		member && transaction
 			? member.id === transaction.owner_id
 				? 'owner'
@@ -52,7 +64,8 @@
 						: null
 			: null
 	);
-	let canViewChat = $derived(viewChatbox && acceptedRole !== null);
+	let canViewChat = $derived((viewChatbox || readOnly) && acceptedRole !== null);
+	let chatboxLocked = $derived(!!transaction?.locked || !!transaction?.points_applied);
 	let pendingMessages = $derived(
 		messages.filter((message) => !message.accepted && message.applied_role !== 'owner')
 	);
@@ -68,14 +81,18 @@
 			)
 	);
 
-	onMount(async () => {
+	onMount(() => {
 		if (!getToken()) {
 			goto('/login');
-			return;
+			return undefined;
 		}
 
 		member = getStoredMember();
-		await loadPage();
+		loadPage().then(startRealtimeRefresh);
+
+		return () => {
+			if (realtimeTimer) clearInterval(realtimeTimer);
+		};
 	});
 
 	async function loadPage() {
@@ -89,8 +106,9 @@
 			]);
 			book = bookRows.find((row) => row.id === Number(page.params.id)) ?? null;
 			if (!book) throw new Error('Book not found');
-			transaction =
-				transactionRows.find((row) => row.book_id === book?.id && !row.points_applied) ?? null;
+			transaction = routeTransactionId
+				? transactionRows.find((row) => row.id === routeTransactionId) ?? null
+				: transactionRows.find((row) => row.book_id === book?.id && !row.archived) ?? null;
 			if (!transaction && isOwner) {
 				transaction = await apiFetch<Transaction>('/api/transactions', {
 					method: 'POST',
@@ -103,6 +121,46 @@
 			error = err instanceof Error ? err.message : 'Unable to load this book';
 		} finally {
 			loading = false;
+		}
+	}
+
+	function startRealtimeRefresh() {
+		if (realtimeTimer) clearInterval(realtimeTimer);
+		realtimeTimer = setInterval(refreshRealtimeState, REALTIME_REFRESH_MS);
+	}
+
+	async function refreshRealtimeState(force = false) {
+		if (!member || !book || realtimeRefreshInFlight || (busy && !force)) return;
+		realtimeRefreshInFlight = true;
+		try {
+			const [latestMember, transactionRows] = await Promise.all([
+				refreshMember(),
+				apiFetch<Transaction[]>('/api/transactions')
+			]);
+			member = latestMember;
+			const latestTransaction = routeTransactionId
+				? transactionRows.find((row) => row.id === routeTransactionId) ?? null
+				: transactionRows.find((row) => row.book_id === book?.id && !row.archived) ?? null;
+			const completedTransaction = transactionRows.find(
+				(row) => !routeTransactionId && row.book_id === book?.id && row.archived
+			);
+
+			if (completedTransaction) {
+				goto('/books');
+				return;
+			}
+
+			transaction = latestTransaction;
+			if (!transaction) {
+				messages = [];
+				return;
+			}
+
+			await loadMessages();
+		} catch {
+			// Keep the current screen stable during brief backend/network gaps.
+		} finally {
+			realtimeRefreshInFlight = false;
 		}
 	}
 
@@ -121,6 +179,7 @@
 	}
 
 	async function ensureTransaction() {
+		if (readOnly) return null;
 		if (transaction || !book) return transaction;
 		transaction = await apiFetch<Transaction>('/api/transactions', {
 			method: 'POST',
@@ -130,7 +189,7 @@
 	}
 
 	async function applyToChatbox() {
-		if (!member || !book) return;
+		if (!member || !book || readOnly) return;
 		busy = true;
 		error = '';
 		try {
@@ -145,7 +204,7 @@
 				})
 			});
 			applyMessage = '';
-			await loadMessages();
+			await refreshRealtimeState(true);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to send application';
 		} finally {
@@ -154,7 +213,7 @@
 	}
 
 	async function sendChatMessage() {
-		if (!member || !transaction || !chatMessage.trim()) return;
+		if (!member || !transaction || !chatMessage.trim() || readOnly) return;
 		busy = true;
 		error = '';
 		try {
@@ -163,7 +222,7 @@
 				body: JSON.stringify({ user_id: member.id, message: chatMessage.trim() })
 			});
 			chatMessage = '';
-			await loadMessages();
+			await refreshRealtimeState(true);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to send message';
 		} finally {
@@ -172,7 +231,7 @@
 	}
 
 	async function decideApplicant(message: ChatMessage, accept: boolean) {
-		if (!member || !transaction) return;
+		if (!member || !transaction || readOnly) return;
 		busy = true;
 		error = '';
 		try {
@@ -187,7 +246,7 @@
 					})
 				}
 			);
-			await loadPage();
+			await refreshRealtimeState(true);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to update participant';
 		} finally {
@@ -196,7 +255,7 @@
 	}
 
 	async function kickAccepted(userId: number | null | undefined, role: Role) {
-		if (!member || !transaction || !userId) return;
+		if (!member || !transaction || !userId || readOnly) return;
 		busy = true;
 		error = '';
 		try {
@@ -208,7 +267,7 @@
 					applied_role: role
 				})
 			});
-			await loadMessages();
+			await refreshRealtimeState(true);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to remove participant';
 		} finally {
@@ -217,7 +276,7 @@
 	}
 
 	async function leaveChatbox() {
-		if (!member || !transaction) return;
+		if (!member || !transaction || readOnly) return;
 		busy = true;
 		error = '';
 		try {
@@ -225,7 +284,7 @@
 				method: 'POST',
 				body: JSON.stringify({ user_id: member.id })
 			});
-			await loadMessages();
+			await refreshRealtimeState(true);
 			activeTab = 'info';
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to leave chatbox';
@@ -235,7 +294,7 @@
 	}
 
 	async function confirmMeeting(otherUserId: number | null) {
-		if (!member || !transaction || !otherUserId) return;
+		if (!member || !transaction || !otherUserId || readOnly) return;
 		busy = true;
 		error = '';
 		try {
@@ -251,7 +310,7 @@
 				goto('/books');
 				return;
 			}
-			await loadMessages();
+			await refreshRealtimeState(true);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to confirm meeting';
 		} finally {
@@ -268,13 +327,25 @@
 		if (tab === 'pending') return ClipboardList;
 		return BookOpen;
 	}
+
+	function roleIcon(role: RoleName): typeof Icon {
+		if (role === 'owner') return Crown;
+		if (role === 'courier') return Truck;
+		return User;
+	}
+
+	function roleLabel(role: RoleName) {
+		if (role === 'owner') return 'Owner';
+		if (role === 'courier') return 'Courier';
+		return 'Requester';
+	}
 </script>
 
 <main class="detail-page">
 	<section class="chatbox-shell">
 		<div class="detail-topbar">
 			<button class="icon-button" type="button" aria-label="Back to books" onclick={() => goto('/books')}>
-				&lt;
+				<ArrowLeft size={21} />
 			</button>
 			<div>
 				<p class="eyebrow">Book Exchange Club</p>
@@ -291,7 +362,7 @@
 				{#each ['info', 'chat', 'pending'] as tab}
 					{@const typedTab = tab as DetailTab}
 					{@const TabIcon = tabIcon(typedTab)}
-					{#if typedTab === 'info' || (typedTab === 'chat' && canViewChat) || (typedTab === 'pending' && isOwner)}
+					{#if typedTab === 'info' || (typedTab === 'chat' && canViewChat) || (typedTab === 'pending' && (isOwner || readOnly))}
 						<button
 							class:active={activeTab === typedTab}
 							type="button"
@@ -323,7 +394,7 @@
 								</div>
 							</div>
 
-							{#if !isOwner && !canViewChat && book.available}
+							{#if !readOnly && !isOwner && !canViewChat && book.available && !chatboxLocked}
 								<form
 									class="application-form"
 									onsubmit={(event) => {
@@ -334,16 +405,20 @@
 									<div class="mode-toggle">
 										<button
 											class:active={applyRole === 'requester'}
+											class="icon-label"
 											type="button"
 											onclick={() => (applyRole = 'requester')}
 										>
+											<User size={17} />
 											Requester
 										</button>
 										<button
 											class:active={applyRole === 'courier'}
+											class="icon-label"
 											type="button"
 											onclick={() => (applyRole = 'courier')}
 										>
+											<Truck size={17} />
 											Courier
 										</button>
 									</div>
@@ -358,6 +433,8 @@
 										{hasApplied ? 'Application sent' : busy ? 'Sending...' : 'Apply'}
 									</button>
 								</form>
+							{:else if !isOwner && !canViewChat && chatboxLocked}
+								<p class="empty-state">This chatbox is locked for handoff.</p>
 							{:else if !isOwner && !book.available}
 								<p class="empty-state">This book is no longer available.</p>
 							{/if}
@@ -365,40 +442,53 @@
 					{:else if activeTab === 'chat'}
 						<div class="message-list">
 							{#each chatMessages as message}
+								{@const MessageRoleIcon = roleIcon(message.applied_role)}
 								<article class:mine={message.user_id === member?.id} class="message-bubble">
-									<strong>{message.user_name} <span>{message.applied_role}</span></strong>
+									<strong>
+										{message.user_name}
+										<span class="role-label">
+											<MessageRoleIcon size={15} />
+											{roleLabel(message.applied_role)}
+										</span>
+									</strong>
 									<p>{message.message}</p>
 								</article>
 							{:else}
 								<p class="empty-state">No chat messages yet.</p>
 							{/each}
 						</div>
-						<form
-							class="chat-form"
-							onsubmit={(event) => {
-								event.preventDefault();
-								sendChatMessage();
-							}}
-						>
-							<input bind:value={chatMessage} placeholder="Send a message" />
-							<button class="primary-action icon-label" disabled={busy} type="submit">
-								<Send size={18} />
-								Send
-							</button>
-						</form>
+						{#if !readOnly}
+							<form
+								class="chat-form"
+								onsubmit={(event) => {
+									event.preventDefault();
+									sendChatMessage();
+								}}
+							>
+								<input bind:value={chatMessage} placeholder="Send a message" />
+								<button class="primary-action icon-label" disabled={busy} type="submit">
+									<Send size={18} />
+									Send
+								</button>
+							</form>
+						{/if}
 					{:else}
 						<div class="pending-list">
 							{#each pendingMessages as message}
+								{@const PendingRoleIcon = roleIcon(message.applied_role)}
 								<article class="pending-card">
 									<div>
-										<p class="eyebrow">{message.applied_role}</p>
+										<p class="eyebrow role-label">
+											<PendingRoleIcon size={15} />
+											{roleLabel(message.applied_role)}
+										</p>
 										<h2>{message.user_name}</h2>
 										<p class="muted">{message.message}</p>
 									</div>
 									<div class="pending-actions">
 										<button
 											class="primary-action icon-label"
-											disabled={busy || transaction?.locked}
+											disabled={busy || transaction?.locked || readOnly}
 											type="button"
 											onclick={() => decideApplicant(message, true)}
 										>
@@ -420,82 +510,98 @@
 						<QrCode size={48} />
 						<strong>{member?.name}</strong>
 						<span>ID {member?.id}</span>
+						<span>{member?.points ?? 0} pts</span>
 					</div>
 
 					{#if transaction}
 						<div class="handoff-status">
-							<p><strong>Requester:</strong> {transaction.requester_name || 'Open'}</p>
-							<p><strong>Courier:</strong> {transaction.courier_name || 'None'}</p>
-							<p><strong>Status:</strong> {transaction.locked ? 'Locked' : 'Open'}</p>
+							<p>
+								<strong class="role-label"><User size={15} /> Requester:</strong>
+								{transaction.requester_name || 'Open'}
+							</p>
+							<p>
+								<strong class="role-label"><Truck size={15} /> Courier:</strong>
+								{transaction.courier_name || 'None'}
+							</p>
+							<p><strong>Status:</strong> {transaction.archived ? 'Archived' : transaction.locked ? 'Locked' : 'Open'}</p>
 						</div>
 
-						{#if acceptedRole === 'owner'}
+						{#if readOnly}
+							<p class="empty-state">Archived read-only room.</p>
+						{:else if acceptedRole === 'owner'}
 							{#if transaction.requester_id}
 								<button
-									class="leave-button"
+									class="leave-button icon-label"
 									disabled={busy || transaction.locked}
 									type="button"
 									onclick={() => kickAccepted(transaction?.requester_id, 'requester')}
 								>
+									<UserMinus size={18} />
 									Remove requester
 								</button>
 							{/if}
 							{#if transaction.courier_id}
 								<button
-									class="leave-button"
+									class="leave-button icon-label"
 									disabled={busy || transaction.locked}
 									type="button"
 									onclick={() => kickAccepted(transaction?.courier_id, 'courier')}
 								>
+									<UserMinus size={18} />
 									Remove courier
 								</button>
 							{/if}
 							{#if transaction.courier_id}
 								<button
-									class="ghost-button"
+									class="ghost-button icon-label"
 									disabled={busy || transaction.owner_confirmed}
 									type="button"
 									onclick={() => confirmWith(transaction?.courier_id)}
 								>
+									<Handshake size={18} />
 									Confirm courier handoff
 								</button>
 							{:else if transaction.requester_id}
 								<button
-									class="ghost-button"
+									class="ghost-button icon-label"
 									disabled={busy || transaction.points_applied}
 									type="button"
 									onclick={() => confirmWith(transaction?.requester_id)}
 								>
+									<Handshake size={18} />
 									Confirm direct handoff
 								</button>
 							{/if}
 						{:else if acceptedRole === 'courier'}
 							{#if !transaction.owner_confirmed}
 								<button
-									class="ghost-button"
+									class="ghost-button icon-label"
 									disabled={busy}
 									type="button"
 									onclick={() => confirmWith(transaction?.owner_id)}
 								>
+									<Handshake size={18} />
 									Confirm owner pickup
 								</button>
 							{:else}
 								<button
-									class="ghost-button"
+									class="ghost-button icon-label"
 									disabled={busy || transaction.requester_confirmed || !transaction.requester_id}
 									type="button"
 									onclick={() => confirmWith(transaction?.requester_id)}
 								>
+									<Handshake size={18} />
 									Confirm requester delivery
 								</button>
 							{/if}
 						{:else if acceptedRole === 'requester' && !transaction.courier_id}
 							<button
-								class="ghost-button"
+								class="ghost-button icon-label"
 								disabled={busy || transaction.points_applied}
 								type="button"
 								onclick={() => confirmWith(transaction?.owner_id)}
 							>
+								<Handshake size={18} />
 								Confirm direct handoff
 							</button>
 						{/if}
