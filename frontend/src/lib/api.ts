@@ -18,6 +18,7 @@ export type Book = {
 	title: string;
 	genre: string;
 	author: string;
+	description: string;
 	publication_year: number;
 	condition: string;
 	exchange_mode: string;

@@ -155,6 +155,12 @@ label {
 	font-weight: 800;
 }
 
+.optional-label {
+	color: #756b66;
+	font-size: 0.82rem;
+	font-weight: 700;
+}
+
 input,
 select,
 textarea {
@@ -176,6 +182,7 @@ textarea:focus {
 .primary-action,
 .ghost-button,
 .edit-button,
+.danger-action,
 .icon-button {
 	min-height: 42px;
 	font-weight: 800;
@@ -190,6 +197,19 @@ textarea:focus {
 }
 
 .primary-action:disabled {
+	cursor: not-allowed;
+	opacity: 0.62;
+}
+
+.danger-action {
+	border: 1px solid #9f3f28;
+	border-radius: 4px;
+	background: #ffffff;
+	color: #9f3f28;
+	padding: 12px 20px;
+}
+
+.danger-action:disabled {
 	cursor: not-allowed;
 	opacity: 0.62;
 }
@@ -611,6 +631,15 @@ textarea:focus {
 
 .book-info-view h2 {
 	font-size: clamp(1.8rem, 4vw, 3rem);
+}
+
+.book-description {
+	margin-top: 18px;
+	max-width: 64ch;
+	color: #3f3a36;
+	font-size: 1rem;
+	line-height: 1.6;
+	white-space: pre-wrap;
 }
 
 .application-form {

@@ -392,6 +392,9 @@
 									<span>{book.exchange_mode}</span>
 									<span>Owner: {book.owner_name}</span>
 								</div>
+								{#if book.description}
+									<p class="book-description">{book.description}</p>
+								{/if}
 							</div>
 
 							{#if !readOnly && !isOwner && !canViewChat && book.available && !chatboxLocked}

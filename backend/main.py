@@ -48,6 +48,7 @@ class Book(SQLModel, table=True):
     title: str
     genre: str
     author: str
+    description: str = ""
     publication_year: int
     condition: str
     exchange_mode: str = "permanent"
@@ -60,6 +61,7 @@ class BookCreate(SQLModel):
     title: str
     genre: str
     author: str
+    description: str = ""
     publication_year: int
     condition: str
     exchange_mode: str = "permanent"
@@ -70,6 +72,7 @@ class BookUpdate(SQLModel):
     title: str
     genre: str
     author: str
+    description: str = ""
     publication_year: int
     condition: str
     exchange_mode: str = "permanent"
@@ -454,6 +457,8 @@ def migrate_schema() -> None:
         book_columns = get_table_columns(connection, "book")
         if book_columns and "picture_path" not in book_columns:
             connection.execute(text("ALTER TABLE book ADD COLUMN picture_path VARCHAR NOT NULL DEFAULT ''"))
+        if book_columns and "description" not in book_columns:
+            connection.execute(text("ALTER TABLE book ADD COLUMN description VARCHAR NOT NULL DEFAULT ''"))
 
         if table_exists(connection, "message"):
             if table_exists(connection, "messages"):
@@ -648,6 +653,7 @@ def book_to_dict(book: Book, owner: Member) -> dict:
         "title": book.title,
         "genre": book.genre,
         "author": book.author,
+        "description": book.description,
         "publication_year": book.publication_year,
         "condition": book.condition,
         "exchange_mode": book.exchange_mode,
@@ -929,6 +935,7 @@ def create_book(
     title: str = Form(...),
     genre: str = Form(...),
     author: str = Form(...),
+    description: str = Form(""),
     publication_year: int = Form(...),
     condition: str = Form(...),
     exchange_mode: str = Form("permanent"),
@@ -941,6 +948,7 @@ def create_book(
     * title: book title
     * genre: book genre
     * author: book author
+    * description: optional book description
     * publication_year: book publication year
     * condition: book condition
     * exchange_mode: permanent exchange or loan mode
@@ -956,6 +964,7 @@ def create_book(
             title=title,
             genre=genre,
             author=author,
+            description=description,
             publication_year=publication_year,
             condition=condition,
             exchange_mode=exchange_mode,
@@ -984,6 +993,7 @@ def update_book(
     title: str = Form(...),
     genre: str = Form(...),
     author: str = Form(...),
+    description: str = Form(""),
     publication_year: int = Form(...),
     condition: str = Form(...),
     exchange_mode: str = Form("permanent"),
@@ -997,6 +1007,7 @@ def update_book(
     * title: updated book title
     * genre: updated book genre
     * author: updated book author
+    * description: optional updated book description
     * publication_year: updated publication year
     * condition: updated condition
     * exchange_mode: updated exchange mode
@@ -1013,6 +1024,7 @@ def update_book(
         book.title = title
         book.genre = genre
         book.author = author
+        book.description = description
         book.publication_year = publication_year
         book.condition = condition
         book.exchange_mode = exchange_mode
@@ -1023,6 +1035,37 @@ def update_book(
         session.commit()
         session.refresh(book)
         return book_to_dict(book, owner)
+
+
+@app.delete("/api/books/{book_id}")
+def delete_book(book_id: int, owner_id: int) -> dict:
+    """
+    tl;dr: Delete one owner-owned book unless its transaction is locked or archived.
+    input:
+    * book_id: book being deleted
+    * owner_id: member who owns the book
+    output:
+    * dictionary showing the book was deleted
+    """
+    with Session(engine) as session:
+        book = get_book(session, book_id)
+        if book.owner_id != owner_id:
+            raise HTTPException(status_code=403, detail="Only the owner can delete this book")
+
+        transactions = session.exec(select(ExchangeTransaction).where(ExchangeTransaction.book_id == book.id)).all()
+        if any(transaction.locked or transaction.archived for transaction in transactions):
+            raise HTTPException(status_code=400, detail="Locked or archived books cannot be deleted")
+
+        transaction_ids = [transaction.id for transaction in transactions if transaction.id is not None]
+        if transaction_ids:
+            messages = session.exec(select(Message).where(Message.transaction_id.in_(transaction_ids))).all()
+            for message in messages:
+                session.delete(message)
+        for transaction in transactions:
+            session.delete(transaction)
+        session.delete(book)
+        session.commit()
+        return {"deleted": True}
 
 
 @app.get("/api/transactions")
