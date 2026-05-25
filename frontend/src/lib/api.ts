@@ -55,6 +55,17 @@ export type ChatMessage = {
 	timestamp: string;
 };
 
+export type RoleApplicationStats = {
+	applying: number;
+	accepted: boolean;
+	accepted_name: string;
+};
+
+export type ApplicationStats = {
+	requester: RoleApplicationStats;
+	courier: RoleApplicationStats;
+};
+
 const TOKEN_KEY = 'httt_token';
 const MEMBER_KEY = 'httt_member';
 

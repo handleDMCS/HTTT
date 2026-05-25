@@ -121,6 +121,12 @@ class ChatMessageCreate(SQLModel):
     message: str
 
 
+class RoleApplicationStats(SQLModel):
+    applying: int
+    accepted: bool
+    accepted_name: str = ""
+
+
 class RoleDecision(SQLModel):
     owner_id: int
     user_id: int
@@ -729,6 +735,42 @@ def message_to_dict(message: Message, member: Member) -> dict:
     }
 
 
+def application_stats_to_dict(session: Session, transaction: ExchangeTransaction) -> dict:
+    """
+    tl;dr: Count unique applicants for each open chatbox role.
+    input:
+    * session: active database session
+    * transaction: transaction whose application rows should be counted
+    output:
+    * dictionary keyed by requester and courier with pending counts and accepted status
+    """
+    role_rows = session.exec(
+        select(Message.user_id, Message.applied_role, Message.accepted).where(
+            Message.transaction_id == transaction.id,
+            Message.applied_role.in_(["requester", "courier"]),
+        )
+    ).all()
+    pending_user_ids = {"requester": set(), "courier": set()}
+    for user_id, applied_role, accepted in role_rows:
+        if not accepted:
+            pending_user_ids[applied_role].add(user_id)
+
+    requester = get_member(session, transaction.requester_id) if transaction.requester_id else None
+    courier = get_member(session, transaction.courier_id) if transaction.courier_id else None
+    return {
+        "requester": {
+            "applying": len(pending_user_ids["requester"]),
+            "accepted": transaction.requester_id is not None,
+            "accepted_name": requester.name if requester else "",
+        },
+        "courier": {
+            "applying": len(pending_user_ids["courier"]),
+            "accepted": transaction.courier_id is not None,
+            "accepted_name": courier.name if courier else "",
+        },
+    }
+
+
 def transaction_to_dict(
     transaction: ExchangeTransaction,
     book: Book,
@@ -1145,6 +1187,20 @@ def list_messages(transaction_id: int, member_id: int) -> list[dict]:
 
         messages = session.exec(statement.order_by(Message.timestamp, Message.message_id)).all()
         return [message_to_dict(message, get_member(session, message.user_id)) for message in messages]
+
+
+@app.get("/api/transactions/{transaction_id}/application-stats")
+def get_application_stats(transaction_id: int) -> dict:
+    """
+    tl;dr: Return public-safe real-time application stats for requester and courier roles.
+    input:
+    * transaction_id: chatbox transaction id
+    output:
+    * unique pending applicant counts and accepted status per role
+    """
+    with Session(engine) as session:
+        transaction = get_transaction(session, transaction_id)
+        return application_stats_to_dict(session, transaction)
 
 
 @app.post("/api/transactions/{transaction_id}/messages")

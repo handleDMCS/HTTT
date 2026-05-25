@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { LogOut, Pencil, Plus } from '@lucide/svelte';
+	import ListingSection from '$lib/components/ListingSection.svelte';
 	import {
 		apiFetch,
 		clearSession,
@@ -152,6 +153,71 @@
 	}
 </script>
 
+{#snippet myBookCard(book: Book)}
+	<div class="book-card owned">
+		<button class="card-hitbox" type="button" onclick={() => openBook(book, true)}>
+			{#if book.picture_path}
+				<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
+			{/if}
+			<span class="book-spine">{book.genre}</span>
+			<strong>{book.title}</strong>
+			<small>{book.author}</small>
+			<span class="pill">{book.exchange_mode}</span>
+		</button>
+		<button class="edit-button icon-label" type="button" onclick={(event) => editBook(event, book)}>
+			<Pencil size={17} />
+			Edit
+		</button>
+	</div>
+{/snippet}
+
+{#snippet acceptedBookCard(book: Book)}
+	<button class="book-card accepted" type="button" onclick={() => openBook(book, true)}>
+		{#if book.picture_path}
+			<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
+		{/if}
+		<span class="book-spine">{book.owner_name}</span>
+		<strong>{book.title}</strong>
+		<small>{book.author}</small>
+		<span class="pill">Chatbox open</span>
+	</button>
+{/snippet}
+
+{#snippet availableBookCard(book: Book)}
+	<button class="book-card available" type="button" onclick={() => openBook(book, false)}>
+		{#if book.picture_path}
+			<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
+		{/if}
+		<span class="book-spine">{book.condition}</span>
+		<strong>{book.title}</strong>
+		<small>{book.author}</small>
+		<span class="pill">By {book.owner_name}</span>
+	</button>
+{/snippet}
+
+{#snippet archivedBookCard(row: { transaction: Transaction; book: Book })}
+	<button
+		class="book-card accepted"
+		type="button"
+		onclick={() => openArchivedBook(row.book, row.transaction)}
+	>
+		{#if row.book.picture_path}
+			<img class="book-thumb" src={mediaUrl(row.book.picture_path)} alt={row.book.title} />
+		{/if}
+		<span class="book-spine">{row.transaction.courier_name || 'Direct handoff'}</span>
+		<strong>{row.book.title}</strong>
+		<small>{row.book.author}</small>
+		<span class="pill">Archived</span>
+	</button>
+{/snippet}
+
+{#snippet newBookAction()}
+	<button class="book-card add-card" type="button" onclick={() => goto('/books/new?mode=new')}>
+		<span><Plus size={28} strokeWidth={2.4} /></span>
+		<strong>New book</strong>
+	</button>
+{/snippet}
+
 <main class="app-shell">
 	<header class="topbar">
 		<div>
@@ -175,104 +241,41 @@
 	{:else if error}
 		<section class="empty-state">{error}</section>
 	{:else}
-		<section class="shelf-section">
-			<div class="section-heading">
-				<h2>My books</h2>
-				<p>{myBooks.length} listed</p>
-			</div>
-			<div class="book-row">
-				{#each myBooks as book}
-					<div class="book-card owned">
-						<button class="card-hitbox" type="button" onclick={() => openBook(book, true)}>
-							{#if book.picture_path}
-								<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
-							{/if}
-							<span class="book-spine">{book.genre}</span>
-							<strong>{book.title}</strong>
-							<small>{book.author}</small>
-							<span class="pill">{book.exchange_mode}</span>
-						</button>
-						<button class="edit-button icon-label" type="button" onclick={(event) => editBook(event, book)}>
-							<Pencil size={17} />
-							Edit
-						</button>
-					</div>
-				{/each}
-				<button class="book-card add-card" type="button" onclick={() => goto('/books/new?mode=new')}>
-					<span><Plus size={28} strokeWidth={2.4} /></span>
-					<strong>New book</strong>
-				</button>
-			</div>
-		</section>
+		<ListingSection
+			title="My books"
+			items={myBooks}
+			getBook={(book) => book}
+			card={myBookCard}
+			actions={newBookAction}
+			emptyText="No books listed yet."
+			countSuffix="listed"
+		/>
 
-		<section class="shelf-section">
-			<div class="section-heading">
-				<h2>Accepted</h2>
-				<p>{acceptedBooks.length} active</p>
-			</div>
-			<div class="book-row">
-				{#each acceptedBooks as book}
-					<button class="book-card accepted" type="button" onclick={() => openBook(book, true)}>
-						{#if book.picture_path}
-							<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
-						{/if}
-						<span class="book-spine">{book.owner_name}</span>
-						<strong>{book.title}</strong>
-						<small>{book.author}</small>
-						<span class="pill">Chatbox open</span>
-					</button>
-				{:else}
-					<div class="empty-card">No accepted exchanges yet.</div>
-				{/each}
-			</div>
-		</section>
+		<ListingSection
+			title="Accepted"
+			items={acceptedBooks}
+			getBook={(book) => book}
+			card={acceptedBookCard}
+			emptyText="No accepted exchanges yet."
+			countSuffix="active"
+		/>
 
-		<section class="shelf-section">
-			<div class="section-heading">
-				<h2>Available</h2>
-				<p>{availableBooks.length} open</p>
-			</div>
-			<div class="book-row">
-				{#each availableBooks as book}
-					<button class="book-card available" type="button" onclick={() => openBook(book, false)}>
-						{#if book.picture_path}
-							<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
-						{/if}
-						<span class="book-spine">{book.condition}</span>
-						<strong>{book.title}</strong>
-						<small>{book.author}</small>
-						<span class="pill">By {book.owner_name}</span>
-					</button>
-				{:else}
-					<div class="empty-card">No available books right now.</div>
-				{/each}
-			</div>
-		</section>
+		<ListingSection
+			title="Available"
+			items={availableBooks}
+			getBook={(book) => book}
+			card={availableBookCard}
+			emptyText="No available books right now."
+			countSuffix="open"
+		/>
 
-		<section class="shelf-section">
-			<div class="section-heading">
-				<h2>Archive</h2>
-				<p>{archivedBookRows.length} completed</p>
-			</div>
-			<div class="book-row">
-				{#each archivedBookRows as row}
-					<button
-						class="book-card accepted"
-						type="button"
-						onclick={() => openArchivedBook(row.book, row.transaction)}
-					>
-						{#if row.book.picture_path}
-							<img class="book-thumb" src={mediaUrl(row.book.picture_path)} alt={row.book.title} />
-						{/if}
-						<span class="book-spine">{row.transaction.courier_name || 'Direct handoff'}</span>
-						<strong>{row.book.title}</strong>
-						<small>{row.book.author}</small>
-						<span class="pill">Archived</span>
-					</button>
-				{:else}
-					<div class="empty-card">No archived exchanges yet.</div>
-				{/each}
-			</div>
-		</section>
+		<ListingSection
+			title="Archive"
+			items={archivedBookRows}
+			getBook={(row) => row.book}
+			card={archivedBookCard}
+			emptyText="No archived exchanges yet."
+			countSuffix="completed"
+		/>
 	{/if}
 </main>

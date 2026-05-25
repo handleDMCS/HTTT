@@ -278,10 +278,63 @@ textarea:focus {
 	gap: 20px;
 }
 
+.section-heading > div:first-child {
+	display: grid;
+	gap: 6px;
+}
+
 .section-heading p {
 	margin-bottom: 2px;
 	color: rgba(29, 29, 25, 0.62);
 	font-weight: 800;
+}
+
+.pagination-controls {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	color: rgba(29, 29, 25, 0.68);
+	font-weight: 800;
+	white-space: nowrap;
+}
+
+.pagination-controls .icon-button {
+	width: 36px;
+	height: 36px;
+	min-height: 36px;
+}
+
+.listing-filters {
+	display: grid;
+	grid-template-columns: minmax(130px, 1fr) minmax(210px, 1.35fr) minmax(150px, 1fr) minmax(150px, 1fr) auto;
+	align-items: end;
+	gap: 12px;
+	border: 1px solid #e5ddd9;
+	border-radius: 4px;
+	background: #ffffff;
+	padding: 14px;
+}
+
+.listing-filters label {
+	gap: 6px;
+	font-size: 0.82rem;
+}
+
+.listing-filters input,
+.listing-filters select {
+	min-height: 40px;
+	padding: 8px 10px;
+}
+
+.listing-filters .ghost-button {
+	min-height: 40px;
+	padding: 8px 14px;
+}
+
+.range-fields {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
 }
 
 .book-row {
@@ -647,11 +700,39 @@ textarea:focus {
 	margin-top: 8px;
 }
 
+.role-stats {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+}
+
+.role-stats div {
+	display: grid;
+	gap: 4px;
+	border: 1px solid #e5ddd9;
+	border-radius: 4px;
+	background: #ffffff;
+	padding: 12px 14px;
+}
+
+.role-stats span {
+	color: rgba(29, 29, 25, 0.62);
+	font-size: 0.78rem;
+	font-weight: 800;
+	text-transform: uppercase;
+}
+
+.role-stats strong {
+	line-height: 1.35;
+}
+
 .message-list,
 .pending-list {
 	display: grid;
 	align-content: start;
 	gap: 14px;
+	height: 420px;
+	min-height: 0;
 	overflow-y: auto;
 	padding-right: 6px;
 }
@@ -770,6 +851,14 @@ textarea:focus {
 		flex-direction: column;
 	}
 
+	.pagination-controls {
+		justify-content: space-between;
+	}
+
+	.listing-filters {
+		grid-template-columns: 1fr;
+	}
+
 	.app-shell {
 		padding-inline: 18px;
 	}
@@ -799,6 +888,15 @@ textarea:focus {
 	.main-panel {
 		min-height: 430px;
 		padding: 18px;
+	}
+
+	.message-list,
+	.pending-list {
+		height: 340px;
+	}
+
+	.role-stats {
+		grid-template-columns: 1fr;
 	}
 
 	.message-bubble {

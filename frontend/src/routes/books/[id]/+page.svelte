@@ -26,6 +26,7 @@
 		refreshMember,
 		type Book,
 		type ChatMessage,
+		type ApplicationStats,
 		type Member,
 		type Transaction
 	} from '$lib/api';
@@ -39,6 +40,10 @@
 	let book = $state<Book | null>(null);
 	let transaction = $state<Transaction | null>(null);
 	let messages = $state<ChatMessage[]>([]);
+	let applicationStats = $state<ApplicationStats>({
+		requester: { applying: 0, accepted: false, accepted_name: '' },
+		courier: { applying: 0, accepted: false, accepted_name: '' }
+	});
 	let activeTab = $state<DetailTab>('info');
 	let loading = $state(true);
 	let busy = $state(false);
@@ -69,6 +74,7 @@
 	let pendingMessages = $derived(
 		messages.filter((message) => !message.accepted && message.applied_role !== 'owner')
 	);
+	let selectedRoleStats = $derived(applicationStats[applyRole]);
 	let chatMessages = $derived(messages.filter((message) => message.accepted));
 	let hasApplied = $derived(
 		!!member &&
@@ -116,7 +122,7 @@
 				});
 			}
 			activeTab = canViewChat ? 'chat' : 'info';
-			await loadMessages();
+			await Promise.all([loadMessages(), loadApplicationStats()]);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to load this book';
 		} finally {
@@ -153,10 +159,11 @@
 			transaction = latestTransaction;
 			if (!transaction) {
 				messages = [];
+				resetApplicationStats();
 				return;
 			}
 
-			await loadMessages();
+			await Promise.all([loadMessages(), loadApplicationStats()]);
 		} catch {
 			// Keep the current screen stable during brief backend/network gaps.
 		} finally {
@@ -176,6 +183,27 @@
 		} catch {
 			messages = [];
 		}
+	}
+
+	async function loadApplicationStats() {
+		if (!transaction) {
+			resetApplicationStats();
+			return;
+		}
+		try {
+			applicationStats = await apiFetch<ApplicationStats>(
+				`/api/transactions/${transaction.id}/application-stats`
+			);
+		} catch {
+			resetApplicationStats();
+		}
+	}
+
+	function resetApplicationStats() {
+		applicationStats = {
+			requester: { applying: 0, accepted: false, accepted_name: '' },
+			courier: { applying: 0, accepted: false, accepted_name: '' }
+		};
 	}
 
 	async function ensureTransaction() {
@@ -424,6 +452,20 @@
 											<Truck size={17} />
 											Courier
 										</button>
+									</div>
+									<div class="role-stats" aria-live="polite">
+										<div>
+											<span>Applying</span>
+											<strong>{selectedRoleStats.applying}</strong>
+										</div>
+										<div>
+											<span>Status</span>
+											<strong
+												>{selectedRoleStats.accepted
+													? `Accepted: ${selectedRoleStats.accepted_name}`
+													: 'Open'}</strong
+											>
+										</div>
 									</div>
 									<label>
 										Introduction note
