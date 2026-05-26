@@ -7,6 +7,8 @@
 	let name = $state('');
 	let email = $state('');
 	let password = $state('');
+	let gender = $state<'male' | 'female'>('male');
+	let age = $state(18);
 	let error = $state('');
 	let loading = $state(false);
 
@@ -22,7 +24,7 @@
 				mode === 'login' ? '/api/auth/login' : '/api/auth/register',
 				{
 					method: 'POST',
-					body: JSON.stringify({ name, email, password })
+					body: JSON.stringify({ name, email, password, gender, age })
 				}
 			);
 			setSession(result.access_token, result.member);
@@ -63,6 +65,19 @@
 					Name
 					<input bind:value={name} autocomplete="name" required placeholder="An Nguyen" />
 				</label>
+				<div class="form-grid">
+					<label>
+						Gender
+						<select bind:value={gender} required>
+							<option value="male">Male</option>
+							<option value="female">Female</option>
+						</select>
+					</label>
+					<label>
+						Age
+						<input bind:value={age} required type="number" min="1" max="120" />
+					</label>
+				</div>
 			{/if}
 
 			<label>

@@ -7,6 +7,10 @@ export type Member = {
 	name: string;
 	email: string;
 	points: number;
+	gender: 'male' | 'female';
+	age: number;
+	avatar_path: string;
+	biography: string;
 	is_courier: boolean;
 };
 
@@ -51,6 +55,17 @@ export type ChatMessage = {
 	transaction_id: number;
 	message: string;
 	applied_role: 'owner' | 'requester' | 'courier';
+	notification_type:
+		| 'join_request'
+		| 'kicked'
+		| 'leave'
+		| 'join'
+		| 'confirm_direct_handoff'
+		| 'confirm_handoff'
+		| 'confirm_delivered'
+		| null;
+	approver_id: number | null;
+	approver_role: 'owner' | 'requester' | 'courier' | null;
 	accepted: boolean;
 	timestamp: string;
 };
@@ -64,6 +79,11 @@ export type RoleApplicationStats = {
 export type ApplicationStats = {
 	requester: RoleApplicationStats;
 	courier: RoleApplicationStats;
+};
+
+export type MemberProfile = {
+	member: Member;
+	books: Book[];
 };
 
 const TOKEN_KEY = 'httt_token';

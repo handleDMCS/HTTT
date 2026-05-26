@@ -1,5 +1,5 @@
 <script lang="ts" generics="T">
-	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
+	import { ChevronLeft, ChevronRight, Search, SlidersHorizontal } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import type { Book } from '$lib/api';
 
@@ -30,6 +30,8 @@
 	let yearTo = $state('');
 	let exchangeMode = $state('');
 	let owner = $state('');
+	let search = $state('');
+	let filtersOpen = $state(false);
 	let page = $state(1);
 
 	let books = $derived(items.map((item) => getBook(item)));
@@ -41,13 +43,15 @@
 			const book = getBook(item);
 			const from = Number.parseInt(yearFrom, 10);
 			const to = Number.parseInt(yearTo, 10);
+			const normalizedSearch = search.trim().toLowerCase();
 
 			return (
 				(!condition || book.condition === condition) &&
 				(!exchangeMode || book.exchange_mode === exchangeMode) &&
 				(!owner || book.owner_name === owner) &&
 				(!yearFrom || book.publication_year >= from) &&
-				(!yearTo || book.publication_year <= to)
+				(!yearTo || book.publication_year <= to) &&
+				(!normalizedSearch || bookSearchText(book).includes(normalizedSearch))
 			);
 		})
 	);
@@ -62,6 +66,7 @@
 		yearTo;
 		exchangeMode;
 		owner;
+		search;
 		page = 1;
 	});
 
@@ -71,6 +76,23 @@
 
 	function uniqueOptions(values: string[]) {
 		return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+	}
+
+	function bookSearchText(book: Book) {
+		return [
+			book.title,
+			book.author,
+			book.genre,
+			book.description,
+			book.publication_year,
+			book.condition,
+			book.exchange_mode,
+			book.owner_name,
+			book.owner_email,
+			book.available ? 'available' : 'unavailable'
+		]
+			.join(' ')
+			.toLowerCase();
 	}
 
 	function clearFilters() {
@@ -88,66 +110,84 @@
 			<h2>{title}</h2>
 			<p>{summary}</p>
 		</div>
-		<div class="pagination-controls" aria-label={`${title} pagination`}>
+		<div class="listing-section-tools">
+			<div class="pagination-controls" aria-label={`${title} pagination`}>
+				<button
+					class="icon-button"
+					type="button"
+					aria-label="Previous page"
+					disabled={page <= 1}
+					onclick={() => (page -= 1)}
+				>
+					<ChevronLeft size={18} />
+				</button>
+				<span>Page {page} of {totalPages}</span>
+				<button
+					class="icon-button"
+					type="button"
+					aria-label="Next page"
+					disabled={page >= totalPages}
+					onclick={() => (page += 1)}
+				>
+					<ChevronRight size={18} />
+				</button>
+			</div>
+			<label class="listing-search">
+				<input bind:value={search} type="search" aria-label="Search books" placeholder="Search books" />
+				<Search size={17} aria-hidden="true" />
+			</label>
 			<button
-				class="icon-button"
+				class:active={filtersOpen}
+				class="ghost-button icon-label filter-toggle"
 				type="button"
-				aria-label="Previous page"
-				disabled={page <= 1}
-				onclick={() => (page -= 1)}
+				aria-expanded={filtersOpen}
+				onclick={() => (filtersOpen = !filtersOpen)}
 			>
-				<ChevronLeft size={18} />
-			</button>
-			<span>Page {page} of {totalPages}</span>
-			<button
-				class="icon-button"
-				type="button"
-				aria-label="Next page"
-				disabled={page >= totalPages}
-				onclick={() => (page += 1)}
-			>
-				<ChevronRight size={18} />
+				<SlidersHorizontal size={17} />
+				Filters
 			</button>
 		</div>
 	</div>
 
-	<div class="listing-filters" aria-label={`${title} filters`}>
-		<label>
-			Condition
-			<select bind:value={condition}>
-				<option value="">Any</option>
-				{#each conditions as option}
-					<option value={option}>{option}</option>
-				{/each}
-			</select>
-		</label>
-		<label>
-			Publication year
-			<div class="range-fields">
-				<input bind:value={yearFrom} type="number" min="0" placeholder="From" />
-				<input bind:value={yearTo} type="number" min="0" placeholder="To" />
-			</div>
-		</label>
-		<label>
-			Exchange mode
-			<select bind:value={exchangeMode}>
-				<option value="">Any</option>
-				{#each exchangeModes as option}
-					<option value={option}>{option}</option>
-				{/each}
-			</select>
-		</label>
-		<label>
-			Owner
-			<select bind:value={owner}>
-				<option value="">Any</option>
-				{#each owners as option}
-					<option value={option}>{option}</option>
-				{/each}
-			</select>
-		</label>
-		<button class="ghost-button" type="button" disabled={!hasFilters} onclick={clearFilters}>Clear</button>
-	</div>
+	{#if filtersOpen}
+		<div class="listing-filters" aria-label={`${title} filters`}>
+			<label>
+				Condition
+				<select bind:value={condition}>
+					<option value="">Any</option>
+					{#each conditions as option}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				Publication year
+				<div class="range-fields">
+					<input bind:value={yearFrom} type="number" min="0" placeholder="From" />
+					<input bind:value={yearTo} type="number" min="0" placeholder="To" />
+				</div>
+			</label>
+			<label>
+				Exchange mode
+				<select bind:value={exchangeMode}>
+					<option value="">Any</option>
+					{#each exchangeModes as option}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				Owner
+				<select bind:value={owner}>
+					<option value="">Any</option>
+					{#each owners as option}
+						<option value={option}>{option}</option>
+					{/each}
+				</select>
+			</label>
+			<button class="ghost-button" type="button" disabled={!hasFilters} onclick={clearFilters}>Clear</button>
+		</div>
+	{/if}
 
 	<div class="book-row">
 		{#each visibleItems as item}

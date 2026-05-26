@@ -4,14 +4,13 @@
 	import { onMount } from 'svelte';
 	import {
 		ArrowLeft,
+		Bell,
 		BookOpen,
 		Check,
-		ClipboardList,
 		Crown,
 		Handshake,
 		LogOut,
 		MessageCircle,
-		QrCode,
 		Send,
 		Truck,
 		User,
@@ -31,7 +30,7 @@
 		type Transaction
 	} from '$lib/api';
 
-	type DetailTab = 'info' | 'chat' | 'pending';
+	type DetailTab = 'info' | 'chat' | 'notification';
 	type Role = 'requester' | 'courier';
 	type RoleName = 'owner' | Role;
 	const REALTIME_REFRESH_MS = 1800;
@@ -71,11 +70,11 @@
 	);
 	let canViewChat = $derived((viewChatbox || readOnly) && acceptedRole !== null);
 	let chatboxLocked = $derived(!!transaction?.locked || !!transaction?.points_applied);
-	let pendingMessages = $derived(
-		messages.filter((message) => !message.accepted && message.applied_role !== 'owner')
-	);
+	let notificationMessages = $derived(messages.filter((message) => message.notification_type !== null));
 	let selectedRoleStats = $derived(applicationStats[applyRole]);
-	let chatMessages = $derived(messages.filter((message) => message.accepted));
+	let chatMessages = $derived(
+		messages.filter((message) => message.accepted && message.notification_type === null)
+	);
 	let hasApplied = $derived(
 		!!member &&
 			!!transaction &&
@@ -83,7 +82,7 @@
 				(message) =>
 					message.user_id === member?.id &&
 					message.transaction_id === transaction?.id &&
-					message.applied_role !== 'owner'
+					message.notification_type === 'join_request'
 			)
 	);
 
@@ -258,25 +257,25 @@
 		}
 	}
 
-	async function decideApplicant(message: ChatMessage, accept: boolean) {
+	async function approveNotification(message: ChatMessage) {
 		if (!member || !transaction || readOnly) return;
 		busy = true;
 		error = '';
 		try {
-			await apiFetch<Transaction>(
-				`/api/transactions/${transaction.id}/${accept ? 'accept' : 'kick'}`,
+			transaction = await apiFetch<Transaction>(
+				`/api/transactions/${transaction.id}/notifications/${message.message_id}/approve`,
 				{
 					method: 'POST',
-					body: JSON.stringify({
-						owner_id: member.id,
-						user_id: message.user_id,
-						applied_role: message.applied_role
-					})
+					body: JSON.stringify({ user_id: member.id })
 				}
 			);
+			if (transaction.points_applied) {
+				goto('/books');
+				return;
+			}
 			await refreshRealtimeState(true);
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Unable to update participant';
+			error = err instanceof Error ? err.message : 'Unable to approve notification';
 		} finally {
 			busy = false;
 		}
@@ -321,38 +320,29 @@
 		}
 	}
 
-	async function confirmMeeting(otherUserId: number | null) {
-		if (!member || !transaction || !otherUserId || readOnly) return;
+	async function createConfirmNotification(notificationType: ChatMessage['notification_type']) {
+		if (!member || !transaction || !notificationType || readOnly) return;
 		busy = true;
 		error = '';
 		try {
-			transaction = await apiFetch<Transaction>('/api/transactions/confirm-meeting', {
+			await apiFetch<ChatMessage>(`/api/transactions/${transaction.id}/notifications`, {
 				method: 'POST',
 				body: JSON.stringify({
-					transaction_id: transaction.id,
-					user_1_id: member.id,
-					user_2_id: otherUserId
+					user_id: member.id,
+					notification_type: notificationType
 				})
 			});
-			if (transaction.points_applied) {
-				goto('/books');
-				return;
-			}
 			await refreshRealtimeState(true);
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Unable to confirm meeting';
+			error = err instanceof Error ? err.message : 'Unable to create confirmation request';
 		} finally {
 			busy = false;
 		}
 	}
 
-	function confirmWith(otherUserId: number | null | undefined) {
-		confirmMeeting(otherUserId ?? null);
-	}
-
 	function tabIcon(tab: DetailTab): typeof Icon {
 		if (tab === 'chat') return MessageCircle;
-		if (tab === 'pending') return ClipboardList;
+		if (tab === 'notification') return Bell;
 		return BookOpen;
 	}
 
@@ -366,6 +356,32 @@
 		if (role === 'owner') return 'Owner';
 		if (role === 'courier') return 'Courier';
 		return 'Requester';
+	}
+
+	function notificationLabel(message: ChatMessage) {
+		if (message.notification_type === 'join_request') return 'Join request';
+		if (message.notification_type === 'kicked') return 'Removed';
+		if (message.notification_type === 'leave') return 'Left';
+		if (message.notification_type === 'join') return 'Joined';
+		if (message.notification_type === 'confirm_direct_handoff') return 'Direct handoff';
+		if (message.notification_type === 'confirm_handoff') return 'Owner-courier handoff';
+		if (message.notification_type === 'confirm_delivered') return 'Delivered';
+		return 'Notification';
+	}
+
+	function canApproveNotification(message: ChatMessage) {
+		return (
+			!!member &&
+			!!acceptedRole &&
+			!readOnly &&
+			!message.accepted &&
+			message.approver_id === member.id &&
+			message.approver_role === acceptedRole
+		);
+	}
+
+	function openProfile(userId: number | null | undefined) {
+		if (userId) goto(`/profile/${userId}`);
 	}
 </script>
 
@@ -387,17 +403,17 @@
 			<p class="empty-state">{error}</p>
 		{:else if book}
 			<div class="detail-tabs" aria-label="Book detail modes">
-				{#each ['info', 'chat', 'pending'] as tab}
+				{#each ['info', 'chat', 'notification'] as tab}
 					{@const typedTab = tab as DetailTab}
 					{@const TabIcon = tabIcon(typedTab)}
-					{#if typedTab === 'info' || (typedTab === 'chat' && canViewChat) || (typedTab === 'pending' && (isOwner || readOnly))}
+					{#if typedTab === 'info' || (typedTab === 'chat' && canViewChat) || (typedTab === 'notification' && canViewChat)}
 						<button
 							class:active={activeTab === typedTab}
 							type="button"
 							onclick={() => (activeTab = typedTab)}
 						>
 							<TabIcon size={18} />
-							{typedTab === 'info' ? 'Book info' : typedTab === 'chat' ? 'Chatbox' : 'Pending'}
+							{typedTab === 'info' ? 'Book info' : typedTab === 'chat' ? 'Chatbox' : 'Notification'}
 						</button>
 					{/if}
 				{/each}
@@ -418,7 +434,12 @@
 									<span>{book.publication_year}</span>
 									<span>{book.condition}</span>
 									<span>{book.exchange_mode}</span>
-									<span>Owner: {book.owner_name}</span>
+									<span>
+										Owner:
+										<button class="inline-link" type="button" onclick={() => openProfile(book?.owner_id)}>
+											{book.owner_name}
+										</button>
+									</span>
 								</div>
 								{#if book.description}
 									<p class="book-description">{book.description}</p>
@@ -490,7 +511,9 @@
 								{@const MessageRoleIcon = roleIcon(message.applied_role)}
 								<article class:mine={message.user_id === member?.id} class="message-bubble">
 									<strong>
-										{message.user_name}
+										<button class="inline-link" type="button" onclick={() => openProfile(message.user_id)}>
+											{message.user_name}
+										</button>
 										<span class="role-label">
 											<MessageRoleIcon size={15} />
 											{roleLabel(message.applied_role)}
@@ -519,31 +542,42 @@
 						{/if}
 					{:else}
 						<div class="pending-list">
-							{#each pendingMessages as message}
+							{#each notificationMessages as message}
 								{@const PendingRoleIcon = roleIcon(message.applied_role)}
 								<article class="pending-card">
 									<div>
 										<p class="eyebrow role-label">
 											<PendingRoleIcon size={15} />
-											{roleLabel(message.applied_role)}
+											{notificationLabel(message)}
 										</p>
-										<h2>{message.user_name}</h2>
+										<h2>
+											<button class="inline-link" type="button" onclick={() => openProfile(message.user_id)}>
+												{message.user_name}
+											</button>
+										</h2>
 										<p class="muted">{message.message}</p>
+										{#if message.approver_role && !message.accepted}
+											<p class="muted">Waiting for {roleLabel(message.approver_role)} approval.</p>
+										{:else if message.approver_role && message.accepted}
+											<p class="muted">Approved.</p>
+										{/if}
 									</div>
-									<div class="pending-actions">
-										<button
-											class="primary-action icon-label"
-											disabled={busy || transaction?.locked || readOnly}
-											type="button"
-											onclick={() => decideApplicant(message, true)}
-										>
-											<Check size={18} />
-											Accept
-										</button>
-									</div>
+									{#if canApproveNotification(message)}
+										<div class="pending-actions">
+											<button
+												class="primary-action icon-label"
+												disabled={busy || readOnly}
+												type="button"
+												onclick={() => approveNotification(message)}
+											>
+												<Check size={18} />
+												Approve
+											</button>
+										</div>
+									{/if}
 								</article>
 							{:else}
-								<p class="empty-state">No pending applications.</p>
+								<p class="empty-state">No notifications yet.</p>
 							{/each}
 						</div>
 					{/if}
@@ -551,22 +585,38 @@
 
 				<aside class="member-panel">
 					<p class="eyebrow">Your info</p>
-					<div class="qr-box">
-						<QrCode size={48} />
+					<div class="personal-info">
 						<strong>{member?.name}</strong>
 						<span>ID {member?.id}</span>
+						<span>{member?.email}</span>
 						<span>{member?.points ?? 0} pts</span>
+						<button class="ghost-button icon-label" type="button" onclick={() => openProfile(member?.id)}>
+							<User size={17} />
+							Profile
+						</button>
 					</div>
 
 					{#if transaction}
 						<div class="handoff-status">
 							<p>
 								<strong class="role-label"><User size={15} /> Requester:</strong>
-								{transaction.requester_name || 'Open'}
+								{#if transaction.requester_id}
+									<button class="inline-link" type="button" onclick={() => openProfile(transaction?.requester_id)}>
+										{transaction.requester_name}
+									</button>
+								{:else}
+									Open
+								{/if}
 							</p>
 							<p>
 								<strong class="role-label"><Truck size={15} /> Courier:</strong>
-								{transaction.courier_name || 'None'}
+								{#if transaction.courier_id}
+									<button class="inline-link" type="button" onclick={() => openProfile(transaction?.courier_id)}>
+										{transaction.courier_name}
+									</button>
+								{:else}
+									None
+								{/if}
 							</p>
 							<p><strong>Status:</strong> {transaction.archived ? 'Archived' : transaction.locked ? 'Locked' : 'Open'}</p>
 						</div>
@@ -601,20 +651,20 @@
 									class="ghost-button icon-label"
 									disabled={busy || transaction.owner_confirmed}
 									type="button"
-									onclick={() => confirmWith(transaction?.courier_id)}
+									onclick={() => createConfirmNotification('confirm_handoff')}
 								>
 									<Handshake size={18} />
-									Confirm courier handoff
+									Request courier handoff
 								</button>
 							{:else if transaction.requester_id}
 								<button
 									class="ghost-button icon-label"
 									disabled={busy || transaction.points_applied}
 									type="button"
-									onclick={() => confirmWith(transaction?.requester_id)}
+									onclick={() => createConfirmNotification('confirm_direct_handoff')}
 								>
 									<Handshake size={18} />
-									Confirm direct handoff
+									Request direct handoff
 								</button>
 							{/if}
 						{:else if acceptedRole === 'courier'}
@@ -623,20 +673,20 @@
 									class="ghost-button icon-label"
 									disabled={busy}
 									type="button"
-									onclick={() => confirmWith(transaction?.owner_id)}
+									onclick={() => createConfirmNotification('confirm_handoff')}
 								>
 									<Handshake size={18} />
-									Confirm owner pickup
+									Request owner pickup
 								</button>
 							{:else}
 								<button
 									class="ghost-button icon-label"
 									disabled={busy || transaction.requester_confirmed || !transaction.requester_id}
 									type="button"
-									onclick={() => confirmWith(transaction?.requester_id)}
+									onclick={() => createConfirmNotification('confirm_delivered')}
 								>
 									<Handshake size={18} />
-									Confirm requester delivery
+									Request delivery approval
 								</button>
 							{/if}
 						{:else if acceptedRole === 'requester' && !transaction.courier_id}
@@ -644,10 +694,20 @@
 								class="ghost-button icon-label"
 								disabled={busy || transaction.points_applied}
 								type="button"
-								onclick={() => confirmWith(transaction?.owner_id)}
+								onclick={() => createConfirmNotification('confirm_direct_handoff')}
 							>
 								<Handshake size={18} />
-								Confirm direct handoff
+								Request direct handoff
+							</button>
+						{:else if acceptedRole === 'requester' && transaction.courier_id && transaction.owner_confirmed}
+							<button
+								class="ghost-button icon-label"
+								disabled={busy || transaction.requester_confirmed}
+								type="button"
+								onclick={() => createConfirmNotification('confirm_delivered')}
+							>
+								<Handshake size={18} />
+								Request delivery approval
 							</button>
 						{/if}
 

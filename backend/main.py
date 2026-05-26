@@ -20,6 +20,7 @@ DATABASE_URL = "sqlite:///db.sqlite3"
 JWT_SECRET = os.getenv("JWT_SECRET", "hackathon-local-secret")
 JWT_EXPIRE_HOURS = 72
 PIC_DIR = "pic"
+AVATAR_DIR = "avatar"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 
@@ -29,6 +30,10 @@ class Member(SQLModel, table=True):
     email: str
     password_hash: str = ""
     points: int = 20
+    gender: str = "male"
+    age: int = 18
+    avatar_path: str = "/avatar/male.svg"
+    biography: str = ""
 
 
 class MemberCreate(SQLModel):
@@ -40,6 +45,8 @@ class AuthRequest(SQLModel):
     name: str = ""
     email: str
     password: str
+    gender: str = "male"
+    age: int = 18
 
 
 class Book(SQLModel, table=True):
@@ -106,6 +113,9 @@ class Message(SQLModel, table=True):
     transaction_id: int = Field(foreign_key="transactions.id")
     message: str
     applied_role: str
+    notification_type: Optional[str] = None
+    approver_id: Optional[int] = Field(default=None, foreign_key="member.id")
+    approver_role: Optional[str] = None
     accepted: bool = False
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -119,6 +129,16 @@ class ApplyRequest(SQLModel):
 class ChatMessageCreate(SQLModel):
     user_id: int
     message: str
+
+
+class NotificationCreate(SQLModel):
+    user_id: int
+    notification_type: str
+    message: str = ""
+
+
+class NotificationApproval(SQLModel):
+    user_id: int
 
 
 class RoleApplicationStats(SQLModel):
@@ -153,7 +173,9 @@ app.add_middleware(
 )
 
 os.makedirs(PIC_DIR, exist_ok=True)
+os.makedirs(AVATAR_DIR, exist_ok=True)
 app.mount("/pic", StaticFiles(directory=PIC_DIR), name="pic")
+app.mount("/avatar", StaticFiles(directory=AVATAR_DIR), name="avatar")
 
 
 def get_member(session: Session, member_id: int) -> Member:
@@ -208,6 +230,47 @@ def save_book_picture(picture: Optional[UploadFile]) -> str:
     with open(disk_path, "wb") as output:
         shutil.copyfileobj(picture.file, output)
     return f"/pic/{filename}"
+
+
+def normalize_gender(gender: str) -> str:
+    normalized = gender.strip().lower()
+    if normalized not in {"male", "female"}:
+        raise HTTPException(status_code=400, detail="Gender must be male or female")
+    return normalized
+
+
+def validate_age(age: int) -> int:
+    if age < 1 or age > 120:
+        raise HTTPException(status_code=400, detail="Age must be between 1 and 120")
+    return age
+
+
+def default_avatar_path(gender: str) -> str:
+    return f"/avatar/{normalize_gender(gender)}.svg"
+
+
+def save_avatar(avatar: Optional[UploadFile]) -> str:
+    """
+    tl;dr: Save an uploaded profile avatar into the local avatar folder.
+    input:
+    * avatar: optional uploaded image file
+    output:
+    * public avatar path or empty string
+    """
+    if avatar is None or not avatar.filename:
+        return ""
+    if avatar.content_type and not avatar.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Avatar must be an image file")
+
+    os.makedirs(AVATAR_DIR, exist_ok=True)
+    extension = os.path.splitext(avatar.filename)[1].lower()
+    if extension not in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}:
+        extension = ".png"
+    filename = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(8)}{extension}"
+    disk_path = os.path.join(AVATAR_DIR, filename)
+    with open(disk_path, "wb") as output:
+        shutil.copyfileobj(avatar.file, output)
+    return f"/avatar/{filename}"
 
 
 def get_transaction(session: Session, transaction_id: int) -> ExchangeTransaction:
@@ -394,6 +457,10 @@ def member_to_dict(member: Member, courier_member_ids: set[int]) -> dict:
         "name": member.name,
         "email": member.email,
         "points": member.points,
+        "gender": member.gender,
+        "age": member.age,
+        "avatar_path": member.avatar_path,
+        "biography": member.biography,
         "is_courier": member.id in courier_member_ids,
     }
 
@@ -441,6 +508,23 @@ def ensure_open_chatbox(transaction: ExchangeTransaction) -> None:
         raise HTTPException(status_code=400, detail="Chatbox is locked")
 
 
+NOTIFICATION_TYPES = {
+    "join_request",
+    "kicked",
+    "leave",
+    "join",
+    "confirm_direct_handoff",
+    "confirm_handoff",
+    "confirm_delivered",
+}
+
+CONFIRM_NOTIFICATION_TYPES = {
+    "confirm_direct_handoff",
+    "confirm_handoff",
+    "confirm_delivered",
+}
+
+
 def migrate_schema() -> None:
     """
     tl;dr: Apply small schema updates for older prototype databases.
@@ -459,6 +543,26 @@ def migrate_schema() -> None:
         member_columns = get_table_columns(connection, "member")
         if "password_hash" not in member_columns:
             connection.execute(text("ALTER TABLE member ADD COLUMN password_hash VARCHAR NOT NULL DEFAULT ''"))
+        if "gender" not in member_columns:
+            connection.execute(text("ALTER TABLE member ADD COLUMN gender VARCHAR NOT NULL DEFAULT 'male'"))
+        if "age" not in member_columns:
+            connection.execute(text("ALTER TABLE member ADD COLUMN age INTEGER NOT NULL DEFAULT 18"))
+        if "avatar_path" not in member_columns:
+            connection.execute(text("ALTER TABLE member ADD COLUMN avatar_path VARCHAR NOT NULL DEFAULT '/avatar/male.svg'"))
+        if "biography" not in member_columns:
+            connection.execute(text("ALTER TABLE member ADD COLUMN biography VARCHAR NOT NULL DEFAULT ''"))
+        connection.execute(
+            text(
+                """
+                UPDATE member
+                SET avatar_path = CASE
+                    WHEN gender = 'female' THEN '/avatar/female.svg'
+                    ELSE '/avatar/male.svg'
+                END
+                WHERE avatar_path IS NULL OR avatar_path = ''
+                """
+            )
+        )
 
         book_columns = get_table_columns(connection, "book")
         if book_columns and "picture_path" not in book_columns:
@@ -495,6 +599,14 @@ def migrate_schema() -> None:
                 connection.execute(text("DROP TABLE message"))
             else:
                 connection.execute(text("ALTER TABLE message RENAME TO messages"))
+
+        message_columns = get_table_columns(connection, "messages")
+        if message_columns and "notification_type" not in message_columns:
+            connection.execute(text("ALTER TABLE messages ADD COLUMN notification_type VARCHAR"))
+        if message_columns and "approver_id" not in message_columns:
+            connection.execute(text("ALTER TABLE messages ADD COLUMN approver_id INTEGER"))
+        if message_columns and "approver_role" not in message_columns:
+            connection.execute(text("ALTER TABLE messages ADD COLUMN approver_role VARCHAR"))
 
         if table_exists(connection, "exchangetransaction"):
             legacy_transaction_columns = get_table_columns(connection, "exchangetransaction")
@@ -690,7 +802,22 @@ def member_role_in_transaction(session: Session, transaction: ExchangeTransactio
     return message.applied_role if message else None
 
 
-def add_message(session: Session, transaction_id: int, user_id: int, role: str, message_text: str, accepted: bool) -> Message:
+def validate_approval_pair(approver_id: Optional[int], approver_role: Optional[str]) -> None:
+    if (approver_id is None) != (approver_role is None):
+        raise HTTPException(status_code=400, detail="approver_id and approver_role must both be set or both be empty")
+
+
+def add_message(
+    session: Session,
+    transaction_id: int,
+    user_id: int,
+    role: str,
+    message_text: str,
+    accepted: bool,
+    notification_type: Optional[str] = None,
+    approver_id: Optional[int] = None,
+    approver_role: Optional[str] = None,
+) -> Message:
     """
     tl;dr: Insert one chatbox message row.
     input:
@@ -699,15 +826,24 @@ def add_message(session: Session, transaction_id: int, user_id: int, role: str, 
     * user_id: member sending the message
     * role: role attached to the message
     * message_text: message body
-    * accepted: whether this message is visible to accepted chatbox participants
+    * accepted: whether this message is visible or already approved
+    * notification_type: optional notification routing type
+    * approver_id: optional required approver id
+    * approver_role: optional required approver role
     output:
     * created Message record
     """
+    if notification_type is not None and notification_type not in NOTIFICATION_TYPES:
+        raise HTTPException(status_code=400, detail="Unknown notification type")
+    validate_approval_pair(approver_id, approver_role)
     message = Message(
         transaction_id=transaction_id,
         user_id=user_id,
         applied_role=role,
         message=message_text,
+        notification_type=notification_type,
+        approver_id=approver_id,
+        approver_role=approver_role,
         accepted=accepted,
     )
     session.add(message)
@@ -730,6 +866,9 @@ def message_to_dict(message: Message, member: Member) -> dict:
         "transaction_id": message.transaction_id,
         "message": message.message,
         "applied_role": message.applied_role,
+        "notification_type": message.notification_type,
+        "approver_id": message.approver_id,
+        "approver_role": message.approver_role,
         "accepted": message.accepted,
         "timestamp": message.timestamp.isoformat(),
     }
@@ -748,6 +887,7 @@ def application_stats_to_dict(session: Session, transaction: ExchangeTransaction
         select(Message.user_id, Message.applied_role, Message.accepted).where(
             Message.transaction_id == transaction.id,
             Message.applied_role.in_(["requester", "courier"]),
+            Message.notification_type == "join_request",
         )
     ).all()
     pending_user_ids = {"requester": set(), "courier": set()}
@@ -847,6 +987,184 @@ def complete_transaction_if_ready(session: Session, transaction: ExchangeTransac
     session.add(transaction)
 
 
+def member_id_for_role(transaction: ExchangeTransaction, role: str) -> Optional[int]:
+    if role == "owner":
+        return transaction.owner_id
+    if role == "requester":
+        return transaction.requester_id
+    if role == "courier":
+        return transaction.courier_id
+    return None
+
+
+def transaction_membership_to_dict(session: Session, transaction: ExchangeTransaction) -> dict:
+    book = get_book(session, transaction.book_id)
+    owner = get_member(session, transaction.owner_id)
+    requester = get_member(session, transaction.requester_id) if transaction.requester_id else None
+    courier = get_member(session, transaction.courier_id) if transaction.courier_id else None
+    return transaction_to_dict(transaction, book, owner, requester, courier)
+
+
+def delete_pending_approval_messages(session: Session, transaction_id: int, user_id: int) -> None:
+    messages = session.exec(
+        select(Message).where(
+            Message.transaction_id == transaction_id,
+            Message.user_id == user_id,
+            Message.approver_id != None,
+        )
+    ).all()
+    for message in messages:
+        session.delete(message)
+
+
+def create_participant_notification(
+    session: Session,
+    transaction: ExchangeTransaction,
+    user_id: int,
+    notification_type: str,
+    message_text: str = "",
+) -> Message:
+    if notification_type not in NOTIFICATION_TYPES:
+        raise HTTPException(status_code=400, detail="Unknown notification type")
+    member = get_member(session, user_id)
+    role = member_role_in_transaction(session, transaction, user_id)
+
+    if notification_type == "join_request":
+        ensure_open_chatbox(transaction)
+        raise HTTPException(status_code=400, detail="Use the apply endpoint for join requests")
+
+    if role is None:
+        raise HTTPException(status_code=403, detail="Only accepted participants can create notifications")
+    if transaction.archived:
+        raise HTTPException(status_code=400, detail="Chatbox is archived")
+
+    approver_id = None
+    approver_role = None
+    accepted = True
+    default_message = message_text
+
+    if notification_type in CONFIRM_NOTIFICATION_TYPES:
+        accepted = False
+        if notification_type == "confirm_direct_handoff":
+            if transaction.courier_id is not None:
+                raise HTTPException(status_code=400, detail="Direct handoff is only available without a courier")
+            if role not in {"owner", "requester"} or not transaction.requester_id:
+                raise HTTPException(status_code=400, detail="Direct handoff requires owner and requester")
+            approver_role = "requester" if role == "owner" else "owner"
+            default_message = default_message or "Direct handoff confirmation requested."
+        elif notification_type == "confirm_handoff":
+            if role not in {"owner", "courier"} or not transaction.courier_id:
+                raise HTTPException(status_code=400, detail="Handoff requires owner and courier")
+            if transaction.owner_confirmed:
+                raise HTTPException(status_code=400, detail="Owner-courier handoff is already confirmed")
+            approver_role = "courier" if role == "owner" else "owner"
+            default_message = default_message or "Owner-courier handoff confirmation requested."
+        elif notification_type == "confirm_delivered":
+            if role not in {"requester", "courier"} or not transaction.requester_id or not transaction.courier_id:
+                raise HTTPException(status_code=400, detail="Delivery requires requester and courier")
+            if not transaction.owner_confirmed:
+                raise HTTPException(status_code=400, detail="Owner-courier handoff must be confirmed first")
+            if transaction.requester_confirmed:
+                raise HTTPException(status_code=400, detail="Delivery is already confirmed")
+            approver_role = "courier" if role == "requester" else "requester"
+            default_message = default_message or "Requester delivery confirmation requested."
+        approver_id = member_id_for_role(transaction, approver_role)
+        if approver_id is None:
+            raise HTTPException(status_code=400, detail="Required approver is not in this chatbox")
+    else:
+        default_message = default_message or f"{member.name} created a {notification_type.replace('_', ' ')} notification."
+
+    return add_message(
+        session,
+        transaction.id,
+        user_id,
+        role,
+        default_message,
+        accepted,
+        notification_type,
+        approver_id,
+        approver_role,
+    )
+
+
+def approve_notification(session: Session, transaction: ExchangeTransaction, notification: Message, user_id: int) -> None:
+    if notification.notification_type is None:
+        raise HTTPException(status_code=400, detail="Message is not a notification")
+    if notification.approver_id is None or notification.approver_role is None:
+        raise HTTPException(status_code=400, detail="Notification does not require approval")
+    if notification.accepted:
+        raise HTTPException(status_code=400, detail="Notification is already approved")
+
+    approver_role = member_role_in_transaction(session, transaction, user_id)
+    if user_id != notification.approver_id or approver_role != notification.approver_role:
+        raise HTTPException(status_code=403, detail="This notification requires a different approver")
+
+    if notification.notification_type == "join_request":
+        ensure_open_chatbox(transaction)
+        applicant = get_member(session, notification.user_id)
+        if notification.applied_role not in {"requester", "courier"}:
+            raise HTTPException(status_code=400, detail="Join request role is invalid")
+        if applicant.id == transaction.owner_id:
+            raise HTTPException(status_code=400, detail="Owner cannot fill requester or courier role")
+        if notification.applied_role == "requester" and applicant.id == transaction.courier_id:
+            raise HTTPException(status_code=400, detail="Requester and courier must be different members")
+        if notification.applied_role == "courier" and applicant.id == transaction.requester_id:
+            raise HTTPException(status_code=400, detail="Courier and requester must be different members")
+
+        previous_role_messages = session.exec(
+            select(Message).where(
+                Message.transaction_id == transaction.id,
+                Message.applied_role == notification.applied_role,
+                Message.accepted == True,
+            )
+        ).all()
+        for message in previous_role_messages:
+            message.accepted = False
+            session.add(message)
+        if notification.applied_role == "requester":
+            transaction.requester_id = applicant.id
+        else:
+            transaction.courier_id = applicant.id
+        transaction.owner_confirmed = False
+        transaction.requester_confirmed = False
+        notification.accepted = True
+        add_message(
+            session,
+            transaction.id,
+            applicant.id,
+            notification.applied_role,
+            f"{applicant.name} joined as {notification.applied_role}.",
+            True,
+            "join",
+        )
+    elif notification.notification_type == "confirm_direct_handoff":
+        if transaction.courier_id is not None:
+            raise HTTPException(status_code=400, detail="Direct handoff is only available without a courier")
+        transaction.owner_confirmed = True
+        transaction.requester_confirmed = True
+        notification.accepted = True
+        complete_transaction_if_ready(session, transaction)
+    elif notification.notification_type == "confirm_handoff":
+        transaction.owner_confirmed = True
+        transaction.locked = True
+        notification.accepted = True
+    elif notification.notification_type == "confirm_delivered":
+        if not transaction.owner_confirmed:
+            raise HTTPException(status_code=400, detail="Owner-courier handoff must be confirmed first")
+        transaction.requester_confirmed = True
+        notification.accepted = True
+        complete_transaction_if_ready(session, transaction)
+    else:
+        raise HTTPException(status_code=400, detail="Notification type does not require approval")
+
+    if transaction.points_applied:
+        book = get_book(session, transaction.book_id)
+        book.available = False
+        session.add(book)
+    session.add(notification)
+    session.add(transaction)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     """
@@ -881,6 +1199,8 @@ def register(payload: AuthRequest) -> dict:
         raise HTTPException(status_code=400, detail="Name is required")
     if len(payload.password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    gender = normalize_gender(payload.gender)
+    age = validate_age(payload.age)
 
     with Session(engine) as session:
         existing = get_member_by_email(session, payload.email)
@@ -891,6 +1211,9 @@ def register(payload: AuthRequest) -> dict:
             email=payload.email.strip().lower(),
             password_hash=hash_password(payload.password),
             points=20,
+            gender=gender,
+            age=age,
+            avatar_path=default_avatar_path(gender),
         )
         session.add(member)
         session.commit()
@@ -942,6 +1265,73 @@ def list_members() -> list[dict]:
         return [member_to_dict(member, courier_member_ids) for member in members]
 
 
+@app.get("/api/members/{member_id}/profile")
+def get_member_profile(member_id: int) -> dict:
+    """
+    tl;dr: Return a public profile and the books posted by that member.
+    input:
+    * member_id: profile owner id
+    output:
+    * member dictionary plus posted book dictionaries
+    """
+    with Session(engine) as session:
+        member = get_member(session, member_id)
+        courier_member_ids = get_courier_member_ids(session)
+        books = session.exec(select(Book).where(Book.owner_id == member_id).order_by(Book.id)).all()
+        return {
+            "member": member_to_dict(member, courier_member_ids),
+            "books": [book_to_dict(book, member) for book in books],
+        }
+
+
+@app.put("/api/members/{member_id}/profile")
+def update_member_profile(
+    member_id: int,
+    name: str = Form(...),
+    gender: str = Form(...),
+    age: int = Form(...),
+    biography: str = Form(""),
+    avatar: Optional[UploadFile] = File(None),
+    authorization: str = Header(default=""),
+) -> dict:
+    """
+    tl;dr: Update editable profile fields for the authenticated member.
+    input:
+    * member_id: profile owner id
+    * name, gender, age, biography: editable profile fields
+    * avatar: optional uploaded avatar image
+    * authorization: bearer token for the current member
+    output:
+    * updated member dictionary
+    """
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    normalized_gender = normalize_gender(gender)
+    validated_age = validate_age(age)
+
+    with Session(engine) as session:
+        current_member = get_current_member(session, authorization)
+        if current_member.id != member_id:
+            raise HTTPException(status_code=403, detail="Only the profile owner can edit this profile")
+
+        previous_gender = current_member.gender
+        current_member.name = name.strip()
+        current_member.gender = normalized_gender
+        current_member.age = validated_age
+        current_member.biography = biography.strip()
+        uploaded_avatar_path = save_avatar(avatar)
+        if uploaded_avatar_path:
+            current_member.avatar_path = uploaded_avatar_path
+        elif current_member.avatar_path == default_avatar_path(previous_gender):
+            current_member.avatar_path = default_avatar_path(normalized_gender)
+
+        session.add(current_member)
+        session.commit()
+        session.refresh(current_member)
+        courier_member_ids = get_courier_member_ids(session)
+        return member_to_dict(current_member, courier_member_ids)
+
+
 @app.post("/api/members")
 def create_member(member: MemberCreate) -> dict:
     """
@@ -952,7 +1342,14 @@ def create_member(member: MemberCreate) -> dict:
     * created Member record
     """
     with Session(engine) as session:
-        new_member = Member(name=member.name, email=member.email.strip().lower(), points=20)
+        new_member = Member(
+            name=member.name,
+            email=member.email.strip().lower(),
+            points=20,
+            gender="male",
+            age=18,
+            avatar_path=default_avatar_path("male"),
+        )
         session.add(new_member)
         session.commit()
         session.refresh(new_member)
@@ -1183,10 +1580,56 @@ def list_messages(transaction_id: int, member_id: int) -> list[dict]:
 
         statement = select(Message).where(Message.transaction_id == transaction_id)
         if role != "owner":
-            statement = statement.where(Message.accepted == True)
+            statement = statement.where((Message.accepted == True) | (Message.notification_type != None))
 
         messages = session.exec(statement.order_by(Message.timestamp, Message.message_id)).all()
         return [message_to_dict(message, get_member(session, message.user_id)) for message in messages]
+
+
+@app.post("/api/transactions/{transaction_id}/notifications")
+def create_notification(transaction_id: int, payload: NotificationCreate) -> dict:
+    """
+    tl;dr: Create a public chatbox notification, optionally requiring role-based approval.
+    input:
+    * transaction_id: chatbox transaction id
+    * payload: sender id, notification type, and optional message body
+    output:
+    * created notification dictionary
+    """
+    with Session(engine) as session:
+        transaction = get_transaction(session, transaction_id)
+        message = create_participant_notification(
+            session,
+            transaction,
+            payload.user_id,
+            payload.notification_type,
+            payload.message,
+        )
+        session.commit()
+        session.refresh(message)
+        return message_to_dict(message, get_member(session, message.user_id))
+
+
+@app.post("/api/transactions/{transaction_id}/notifications/{message_id}/approve")
+def approve_transaction_notification(transaction_id: int, message_id: int, payload: NotificationApproval) -> dict:
+    """
+    tl;dr: Approve one notification when the current member matches its required approver id and role.
+    input:
+    * transaction_id: chatbox transaction id
+    * message_id: notification message id
+    * payload: member approving the notification
+    output:
+    * updated transaction dictionary
+    """
+    with Session(engine) as session:
+        transaction = get_transaction(session, transaction_id)
+        notification = session.get(Message, message_id)
+        if not notification or notification.transaction_id != transaction_id:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        approve_notification(session, transaction, notification, payload.user_id)
+        session.commit()
+        session.refresh(transaction)
+        return transaction_membership_to_dict(session, transaction)
 
 
 @app.get("/api/transactions/{transaction_id}/application-stats")
@@ -1251,7 +1694,17 @@ def apply_to_chatbox(transaction_id: int, payload: ApplyRequest) -> dict:
         if payload.applied_role == "courier" and member.id == transaction.requester_id:
             raise HTTPException(status_code=400, detail="Courier and requester must be different members")
 
-        message = add_message(session, transaction_id, member.id, payload.applied_role, payload.message, False)
+        message = add_message(
+            session,
+            transaction_id,
+            member.id,
+            payload.applied_role,
+            payload.message,
+            False,
+            "join_request",
+            transaction.owner_id,
+            "owner",
+        )
         session.commit()
         session.refresh(message)
         return message_to_dict(message, member)
@@ -1287,40 +1740,16 @@ def accept_participant(transaction_id: int, payload: RoleDecision) -> dict:
                 Message.transaction_id == transaction_id,
                 Message.user_id == member.id,
                 Message.applied_role == payload.applied_role,
-            )
+                Message.notification_type == "join_request",
+                Message.accepted == False,
+            ).order_by(Message.timestamp, Message.message_id)
         ).all()
         if not applicant_messages:
             raise HTTPException(status_code=400, detail="Member has not applied for this role")
-
-        role_messages = session.exec(
-            select(Message).where(
-                Message.transaction_id == transaction_id,
-                Message.applied_role == payload.applied_role,
-                Message.accepted == True,
-            )
-        ).all()
-        for message in role_messages:
-            message.accepted = False
-            session.add(message)
-        for message in applicant_messages:
-            message.accepted = True
-            session.add(message)
-
-        if payload.applied_role == "requester":
-            transaction.requester_id = member.id
-        else:
-            transaction.courier_id = member.id
-        transaction.owner_confirmed = False
-        transaction.requester_confirmed = False
-        session.add(transaction)
+        approve_notification(session, transaction, applicant_messages[-1], payload.owner_id)
         session.commit()
         session.refresh(transaction)
-
-        book = get_book(session, transaction.book_id)
-        owner = get_member(session, transaction.owner_id)
-        requester = get_member(session, transaction.requester_id) if transaction.requester_id else None
-        courier = get_member(session, transaction.courier_id) if transaction.courier_id else None
-        return transaction_to_dict(transaction, book, owner, requester, courier)
+        return transaction_membership_to_dict(session, transaction)
 
 
 @app.post("/api/transactions/{transaction_id}/leave")
@@ -1352,6 +1781,16 @@ def leave_chatbox(transaction_id: int, payload: LeaveRequest) -> dict:
         for message in messages:
             message.accepted = False
             session.add(message)
+        delete_pending_approval_messages(session, transaction_id, payload.user_id)
+        add_message(
+            session,
+            transaction_id,
+            payload.user_id,
+            role,
+            f"{get_member(session, payload.user_id).name} left the chatbox.",
+            True,
+            "leave",
+        )
         if role == "requester":
             transaction.requester_id = None
         else:
@@ -1361,12 +1800,7 @@ def leave_chatbox(transaction_id: int, payload: LeaveRequest) -> dict:
         session.add(transaction)
         session.commit()
         session.refresh(transaction)
-
-        book = get_book(session, transaction.book_id)
-        owner = get_member(session, transaction.owner_id)
-        requester = get_member(session, transaction.requester_id) if transaction.requester_id else None
-        courier = get_member(session, transaction.courier_id) if transaction.courier_id else None
-        return transaction_to_dict(transaction, book, owner, requester, courier)
+        return transaction_membership_to_dict(session, transaction)
 
 
 @app.post("/api/transactions/{transaction_id}/kick")
@@ -1401,6 +1835,16 @@ def kick_participant(transaction_id: int, payload: RoleDecision) -> dict:
         for message in messages:
             message.accepted = False
             session.add(message)
+        delete_pending_approval_messages(session, transaction_id, payload.user_id)
+        add_message(
+            session,
+            transaction_id,
+            payload.user_id,
+            payload.applied_role,
+            f"{get_member(session, payload.user_id).name} was removed from the chatbox.",
+            True,
+            "kicked",
+        )
         if payload.applied_role == "requester":
             transaction.requester_id = None
         else:
@@ -1410,12 +1854,7 @@ def kick_participant(transaction_id: int, payload: RoleDecision) -> dict:
         session.add(transaction)
         session.commit()
         session.refresh(transaction)
-
-        book = get_book(session, transaction.book_id)
-        owner = get_member(session, transaction.owner_id)
-        requester = get_member(session, transaction.requester_id) if transaction.requester_id else None
-        courier = get_member(session, transaction.courier_id) if transaction.courier_id else None
-        return transaction_to_dict(transaction, book, owner, requester, courier)
+        return transaction_membership_to_dict(session, transaction)
 
 
 @app.post("/api/transactions/confirm-meeting")
@@ -1482,11 +1921,56 @@ def demo_seed() -> dict:
             return {"created": False, "message": "Demo data already exists"}
 
         demo_password = "demo1234"
-        an = Member(name="An", email="an@example.com", password_hash=hash_password(demo_password), points=20)
-        binh = Member(name="Binh", email="binh@example.com", password_hash=hash_password(demo_password), points=20)
-        chi = Member(name="Chi", email="chi@example.com", password_hash=hash_password(demo_password), points=20)
-        dung = Member(name="Dung", email="dung@example.com", password_hash=hash_password(demo_password), points=20)
-        giang = Member(name="Giang", email="giang@example.com", password_hash=hash_password(demo_password), points=20)
+        an = Member(
+            name="An",
+            email="an@example.com",
+            password_hash=hash_password(demo_password),
+            points=20,
+            gender="male",
+            age=22,
+            avatar_path=default_avatar_path("male"),
+            biography="Software books and practical reading notes.",
+        )
+        binh = Member(
+            name="Binh",
+            email="binh@example.com",
+            password_hash=hash_password(demo_password),
+            points=20,
+            gender="male",
+            age=24,
+            avatar_path=default_avatar_path("male"),
+            biography="Fantasy and old paperbacks.",
+        )
+        chi = Member(
+            name="Chi",
+            email="chi@example.com",
+            password_hash=hash_password(demo_password),
+            points=20,
+            gender="female",
+            age=21,
+            avatar_path=default_avatar_path("female"),
+            biography="Likes well-used technical books.",
+        )
+        dung = Member(
+            name="Dung",
+            email="dung@example.com",
+            password_hash=hash_password(demo_password),
+            points=20,
+            gender="male",
+            age=26,
+            avatar_path=default_avatar_path("male"),
+            biography="Science fiction and delivery-friendly swaps.",
+        )
+        giang = Member(
+            name="Giang",
+            email="giang@example.com",
+            password_hash=hash_password(demo_password),
+            points=20,
+            gender="female",
+            age=23,
+            avatar_path=default_avatar_path("female"),
+            biography="Habit, design, and self-improvement shelves.",
+        )
         members = [an, binh, chi, dung, giang]
         for member in members:
             session.add(member)

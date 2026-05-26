@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { LogOut, Pencil, Plus } from '@lucide/svelte';
+	import { LogOut, Pencil, Plus, User } from '@lucide/svelte';
 	import ListingSection from '$lib/components/ListingSection.svelte';
 	import {
 		apiFetch,
@@ -228,6 +228,10 @@
 			{#if member}
 				<span>{member.name}</span>
 				<strong>{member.points} pts</strong>
+				<button class="ghost-button icon-label" type="button" onclick={() => goto(`/profile/${member?.id}`)}>
+					<User size={17} />
+					Profile
+				</button>
 			{/if}
 			<button class="ghost-button icon-label" type="button" onclick={logout}>
 				<LogOut size={17} />
