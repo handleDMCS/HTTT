@@ -199,9 +199,9 @@
 				<p class="form-error">{error}</p>
 			{/if}
 
-			<button class="primary-action icon-label" disabled={loading} type="submit">
+			<button class="primary-action" disabled={loading} type="submit">
 				{#if !loading}
-					<Save size={18} />
+					<Save size={18} class="inline"/>
 				{/if}
 				{loading ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Create listing'}
 			</button>

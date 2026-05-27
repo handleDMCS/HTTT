@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import UniqueConstraint, text
+from sqlalchemy import Index, UniqueConstraint, func, text
 from sqlalchemy.engine import Connection
 from sqlmodel import Field, SQLModel, Session, create_engine, select
 
@@ -107,6 +107,15 @@ class TransactionCreate(SQLModel):
 
 class Message(SQLModel, table=True):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index(
+            "ix_messages_one_join_request_per_member_transaction",
+            "user_id",
+            "transaction_id",
+            unique=True,
+            sqlite_where=text("notification_type = 'join_request'"),
+        ),
+    )
 
     message_id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="member.id")
@@ -171,6 +180,10 @@ class RoleDecision(SQLModel):
 
 
 class LeaveRequest(SQLModel):
+    user_id: int
+
+
+class WithdrawApplication(SQLModel):
     user_id: int
 
 
@@ -624,6 +637,38 @@ def migrate_schema() -> None:
             connection.execute(text("ALTER TABLE messages ADD COLUMN approver_id INTEGER"))
         if message_columns and "approver_role" not in message_columns:
             connection.execute(text("ALTER TABLE messages ADD COLUMN approver_role VARCHAR"))
+        if message_columns:
+            connection.execute(
+                text(
+                    """
+                    DELETE FROM messages
+                    WHERE notification_type = 'join_request'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM messages AS newer
+                        WHERE newer.notification_type = 'join_request'
+                        AND newer.user_id = messages.user_id
+                        AND newer.transaction_id = messages.transaction_id
+                        AND (
+                            newer.timestamp > messages.timestamp
+                            OR (
+                                newer.timestamp = messages.timestamp
+                                AND newer.message_id > messages.message_id
+                            )
+                        )
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_one_join_request_per_member_transaction
+                    ON messages (user_id, transaction_id)
+                    WHERE notification_type = 'join_request'
+                    """
+                )
+            )
 
         if not table_exists(connection, "activity_tracking"):
             connection.execute(
@@ -790,6 +835,116 @@ def points_for_mode(exchange_mode: str) -> int:
     raise HTTPException(status_code=400, detail="exchange_mode must be permanent or loan")
 
 
+def requester_budget_exposure(session: Session, member_id: int, exclude_transaction_id: Optional[int] = None) -> dict:
+    """
+    tl;dr: Aggregate active requester point exposure for one member.
+    input:
+    * session: active database session
+    * member_id: member whose requester exposure should be counted
+    * exclude_transaction_id: optional transaction to ignore while replacing an application
+    output:
+    * counts and reserved point total for pending and accepted requester commitments
+    """
+    loan_count = 0
+    permanent_count = 0
+    seen_transaction_ids: set[int] = set()
+
+    accepted_transactions = session.exec(
+        select(ExchangeTransaction).where(
+            ExchangeTransaction.requester_id == member_id,
+            ExchangeTransaction.points_applied == False,
+            ExchangeTransaction.archived == False,
+        )
+    ).all()
+    for transaction in accepted_transactions:
+        if transaction.id is None or transaction.id == exclude_transaction_id:
+            continue
+        seen_transaction_ids.add(transaction.id)
+        if transaction.exchange_mode == "loan":
+            loan_count += 1
+        elif transaction.exchange_mode == "permanent":
+            permanent_count += 1
+
+    pending_requests = session.exec(
+        select(Message, ExchangeTransaction)
+        .join(ExchangeTransaction, Message.transaction_id == ExchangeTransaction.id)
+        .where(
+            Message.user_id == member_id,
+            Message.notification_type == "join_request",
+            Message.applied_role == "requester",
+            Message.accepted == False,
+            ExchangeTransaction.points_applied == False,
+            ExchangeTransaction.archived == False,
+        )
+    ).all()
+    for _, transaction in pending_requests:
+        if transaction.id is None or transaction.id == exclude_transaction_id or transaction.id in seen_transaction_ids:
+            continue
+        seen_transaction_ids.add(transaction.id)
+        if transaction.exchange_mode == "loan":
+            loan_count += 1
+        elif transaction.exchange_mode == "permanent":
+            permanent_count += 1
+
+    return {
+        "loan_requests": loan_count,
+        "permanent_requests": permanent_count,
+        "reserved_points": loan_count * points_for_mode("loan") + permanent_count * points_for_mode("permanent"),
+    }
+
+
+def requester_budget_to_dict(
+    session: Session,
+    member: Member,
+    transaction: Optional[ExchangeTransaction] = None,
+    book: Optional[Book] = None,
+    exclude_transaction_id: Optional[int] = None,
+) -> dict:
+    """
+    tl;dr: Build a frontend-friendly requester budget summary.
+    input:
+    * session: active database session
+    * member: member whose budget is summarized
+    * transaction: optional transaction being requested
+    * book: optional book being requested when no transaction exists yet
+    * exclude_transaction_id: optional transaction to ignore while replacing an application
+    output:
+    * dictionary with current, reserved, available, and optional required points
+    """
+    exposure = requester_budget_exposure(session, member.id, exclude_transaction_id)
+    available_points = member.points - exposure["reserved_points"]
+    exchange_mode = transaction.exchange_mode if transaction else book.exchange_mode if book else ""
+    required_points = points_for_mode(exchange_mode) if exchange_mode else 0
+    return {
+        "member_id": member.id,
+        "points": member.points,
+        "reserved_points": exposure["reserved_points"],
+        "available_points": available_points,
+        "loan_requests": exposure["loan_requests"],
+        "permanent_requests": exposure["permanent_requests"],
+        "required_points": required_points,
+        "can_request": required_points == 0 or available_points >= required_points,
+    }
+
+
+def ensure_requester_budget(session: Session, member: Member, transaction: ExchangeTransaction) -> None:
+    """
+    tl;dr: Stop requester applications that would exceed available points.
+    input:
+    * session: active database session
+    * member: requester applying to a transaction
+    * transaction: transaction being requested
+    output:
+    * None
+    """
+    budget = requester_budget_to_dict(session, member, transaction, transaction.id)
+    if not budget["can_request"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not enough available points. You need {budget['required_points']} points.",
+        )
+
+
 def book_to_dict(book: Book, owner: Member) -> dict:
     """
     tl;dr: Convert a book and owner into a frontend-friendly dictionary.
@@ -828,14 +983,11 @@ def member_role_in_transaction(session: Session, transaction: ExchangeTransactio
     """
     if user_id == transaction.owner_id:
         return "owner"
-    message = session.exec(
-        select(Message).where(
-            Message.transaction_id == transaction.id,
-            Message.user_id == user_id,
-            Message.accepted == True,
-        )
-    ).first()
-    return message.applied_role if message else None
+    if user_id == transaction.requester_id:
+        return "requester"
+    if user_id == transaction.courier_id:
+        return "courier"
+    return None
 
 
 def validate_approval_pair(approver_id: Optional[int], approver_role: Optional[str]) -> None:
@@ -884,6 +1036,50 @@ def add_message(
     )
     session.add(message)
     return message
+
+
+def add_or_replace_join_request(
+    session: Session,
+    transaction: ExchangeTransaction,
+    user_id: int,
+    role: str,
+    message_text: str,
+) -> Message:
+    """
+    tl;dr: Replace a member's pending join request for a transaction with a fresh row.
+    input:
+    * session: active database session
+    * transaction: transaction receiving the join request
+    * user_id: applicant member id
+    * role: requested requester or courier role
+    * message_text: applicant introduction message
+    output:
+    * new Message record replacing previous pending join requests
+    """
+    existing_requests = session.exec(
+        select(Message).where(
+            Message.transaction_id == transaction.id,
+            Message.user_id == user_id,
+            Message.notification_type == "join_request",
+        )
+    ).all()
+    next_message_id = (session.exec(select(func.max(Message.message_id))).one() or 0) + 1
+    for request in existing_requests:
+        session.delete(request)
+    session.flush()
+    replacement = Message(
+        message_id=next_message_id,
+        transaction_id=transaction.id,
+        user_id=user_id,
+        applied_role=role,
+        message=message_text,
+        notification_type="join_request",
+        approver_id=transaction.owner_id,
+        approver_role="owner",
+        accepted=False,
+    )
+    session.add(replacement)
+    return replacement
 
 
 def message_to_dict(message: Message, member: Member) -> dict:
@@ -1177,6 +1373,27 @@ def delete_pending_approval_messages(session: Session, transaction_id: int, user
         session.delete(message)
 
 
+def delete_join_requests(session: Session, transaction_id: int, user_id: int) -> None:
+    """
+    tl;dr: Delete all join request messages for one member and transaction.
+    input:
+    * session: active database session
+    * transaction_id: transaction whose join requests should be deleted
+    * user_id: member whose join requests should be deleted
+    output:
+    * None
+    """
+    messages = session.exec(
+        select(Message).where(
+            Message.transaction_id == transaction_id,
+            Message.user_id == user_id,
+            Message.notification_type == "join_request",
+        )
+    ).all()
+    for message in messages:
+        session.delete(message)
+
+
 def create_participant_notification(
     session: Session,
     transaction: ExchangeTransaction,
@@ -1297,6 +1514,7 @@ def approve_notification(session: Session, transaction: ExchangeTransaction, not
             True,
             "join",
         )
+        delete_join_requests(session, transaction.id, applicant.id)
     elif notification.notification_type == "confirm_direct_handoff":
         if transaction.courier_id is not None:
             raise HTTPException(status_code=400, detail="Direct handoff is only available without a courier")
@@ -1321,7 +1539,8 @@ def approve_notification(session: Session, transaction: ExchangeTransaction, not
         book = get_book(session, transaction.book_id)
         book.available = False
         session.add(book)
-    session.add(notification)
+    if notification.notification_type != "join_request":
+        session.add(notification)
     session.add(transaction)
 
 
@@ -1444,6 +1663,28 @@ def get_member_profile(member_id: int) -> dict:
         }
 
 
+@app.get("/api/members/{member_id}/request-budget")
+def get_request_budget(
+    member_id: int,
+    transaction_id: Optional[int] = None,
+    book_id: Optional[int] = None,
+) -> dict:
+    """
+    tl;dr: Return aggregate available points for requester applications.
+    input:
+    * member_id: member whose requester budget should be calculated
+    * transaction_id: optional transaction being requested
+    * book_id: optional book being requested when no transaction exists yet
+    output:
+    * current, reserved, available, and optional required point summary
+    """
+    with Session(engine) as session:
+        member = get_member(session, member_id)
+        transaction = get_transaction(session, transaction_id) if transaction_id is not None else None
+        book = get_book(session, book_id) if transaction is None and book_id is not None else None
+        return requester_budget_to_dict(session, member, transaction, book)
+
+
 @app.get("/api/members/{member_id}/messages")
 def list_member_messages(member_id: int) -> list[dict]:
     """
@@ -1457,6 +1698,30 @@ def list_member_messages(member_id: int) -> list[dict]:
         get_member(session, member_id)
         messages = visible_messages_for_dropdown(session, member_id)
         return [message_to_activity_dict(session, message) for message in messages]
+
+
+@app.get("/api/members/{member_id}/applications")
+def list_member_applications(member_id: int) -> list[dict]:
+    """
+    tl;dr: Return pending join request applications created by one member.
+    input:
+    * member_id: member whose pending applications should be returned
+    output:
+    * pending join request dictionaries with book context
+    """
+    with Session(engine) as session:
+        get_member(session, member_id)
+        messages = session.exec(
+            select(Message).where(
+                Message.user_id == member_id,
+                Message.notification_type == "join_request",
+                Message.accepted == False,
+            )
+        ).all()
+        return [
+            message_to_activity_dict(session, message)
+            for message in sorted(messages, key=lambda row: (utc_timestamp(row.timestamp), row.message_id or 0), reverse=True)
+        ]
 
 
 @app.put("/api/members/{member_id}/profile")
@@ -1925,25 +2190,79 @@ def apply_to_chatbox(transaction_id: int, payload: ApplyRequest) -> dict:
             raise HTTPException(status_code=400, detail="Applicants must choose requester or courier")
         if member.id == transaction.owner_id:
             raise HTTPException(status_code=400, detail="Owner cannot apply to their own chatbox")
+        if member_role_in_transaction(session, transaction, member.id) is not None:
+            raise HTTPException(status_code=400, detail="Accepted participants must leave before re-applying")
         if payload.applied_role == "requester" and member.id == transaction.courier_id:
             raise HTTPException(status_code=400, detail="Requester and courier must be different members")
         if payload.applied_role == "courier" and member.id == transaction.requester_id:
             raise HTTPException(status_code=400, detail="Courier and requester must be different members")
+        if payload.applied_role == "requester":
+            ensure_requester_budget(session, member, transaction)
 
-        message = add_message(
+        message = add_or_replace_join_request(
             session,
-            transaction_id,
+            transaction,
             member.id,
             payload.applied_role,
             payload.message,
-            False,
-            "join_request",
-            transaction.owner_id,
-            "owner",
         )
         session.commit()
         session.refresh(message)
         return message_to_dict(message, member)
+
+
+@app.post("/api/transactions/{transaction_id}/withdraw-application")
+def withdraw_application(transaction_id: int, payload: WithdrawApplication) -> dict:
+    """
+    tl;dr: Delete a member's pending join request application for one transaction.
+    input:
+    * transaction_id: transaction whose application should be withdrawn
+    * payload: member id withdrawing their join request
+    output:
+    * dictionary showing whether a join request was withdrawn
+    """
+    with Session(engine) as session:
+        transaction = get_transaction(session, transaction_id)
+        ensure_open_chatbox(transaction)
+        member = get_member(session, payload.user_id)
+        if member_role_in_transaction(session, transaction, member.id) is not None:
+            raise HTTPException(status_code=400, detail="Accepted participants must leave instead")
+        messages = session.exec(
+            select(Message).where(
+                Message.transaction_id == transaction_id,
+                Message.user_id == member.id,
+                Message.notification_type == "join_request",
+                Message.accepted == False,
+            )
+        ).all()
+        for message in messages:
+            session.delete(message)
+        session.commit()
+        return {"withdrawn": len(messages) > 0}
+
+
+@app.get("/api/transactions/{transaction_id}/application")
+def get_my_application(transaction_id: int, user_id: int) -> Optional[dict]:
+    """
+    tl;dr: Return one member's pending join request for a transaction.
+    input:
+    * transaction_id: transaction whose application should be inspected
+    * user_id: member whose join request should be loaded
+    output:
+    * pending join request dictionary or None
+    """
+    with Session(engine) as session:
+        get_transaction(session, transaction_id)
+        member = get_member(session, user_id)
+        message = session.exec(
+            select(Message).where(
+                Message.transaction_id == transaction_id,
+                Message.user_id == member.id,
+                Message.notification_type == "join_request",
+                Message.accepted == False,
+            )
+        ).first()
+        return message_to_dict(message, member) if message else None
 
 
 @app.post("/api/transactions/{transaction_id}/accept")

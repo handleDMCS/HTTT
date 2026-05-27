@@ -952,6 +952,28 @@ textarea:focus {
 	margin-top: 8px;
 }
 
+.application-form .mode-toggle .active {
+	border-color: #1d1d19;
+	background: #1d1d19;
+	color: #ffffff;
+}
+
+.application-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.application-actions button {
+	flex: 1 1 150px;
+}
+
+.form-help {
+	margin: 0;
+	color: rgba(29, 29, 25, 0.68);
+	font-weight: 800;
+}
+
 .role-stats {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
@@ -1012,10 +1034,23 @@ textarea:focus {
 	margin-bottom: 6px;
 }
 
-.message-bubble span {
-	color: #d97757;
+.message-bubble .role-label,
+.pending-card .eyebrow.role-label {
+	color: rgba(29, 29, 25, 0.68);
 	font-size: 0.82rem;
 	text-transform: uppercase;
+}
+
+.message-list .inline-link,
+.pending-list .inline-link {
+	color: #d97757;
+}
+
+.message-list .inline-link:hover,
+.message-list .inline-link:focus-visible,
+.pending-list .inline-link:hover,
+.pending-list .inline-link:focus-visible {
+	color: #9f3f28;
 }
 
 .message-bubble p,

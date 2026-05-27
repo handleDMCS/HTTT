@@ -93,6 +93,17 @@ export type ApplicationStats = {
 	courier: RoleApplicationStats;
 };
 
+export type RequestBudget = {
+	member_id: number;
+	points: number;
+	reserved_points: number;
+	available_points: number;
+	loan_requests: number;
+	permanent_requests: number;
+	required_points: number;
+	can_request: boolean;
+};
+
 export type MemberProfile = {
 	member: Member;
 	books: Book[];

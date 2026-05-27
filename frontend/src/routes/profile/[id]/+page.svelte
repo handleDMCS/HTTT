@@ -108,7 +108,7 @@
 	}
 
 	function openBook(book: Book) {
-		goto(`/books/${book.id}?view_chatbox=false`);
+		goto(`/books/${book.id}?tab=${encodeURIComponent('book info')}`);
 	}
 </script>
 
@@ -202,9 +202,9 @@
 							<p class="form-error">{error}</p>
 						{/if}
 						<div class="profile-edit-actions">
-							<button class="primary-action icon-label" disabled={saving} type="submit">
+							<button class="primary-action" disabled={saving} type="submit">
 								{#if !saving}
-									<Save size={18} />
+									<Save size={18} class="inline"/>
 								{/if}
 								{saving ? 'Saving...' : 'Save changes'}
 							</button>

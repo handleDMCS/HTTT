@@ -19,11 +19,13 @@
 	} from '$lib/api';
 
 	const REALTIME_REFRESH_MS = 1800;
+	type RouteTab = 'book info' | 'chatbox' | 'notification';
 
 	let member = $state<Member | null>(null);
 	let books = $state<Book[]>([]);
 	let transactions = $state<Transaction[]>([]);
 	let activityMessages = $state<ActivityMessage[]>([]);
+	let applicationMessages = $state<ActivityMessage[]>([]);
 	let unreadCounts = $state<UnreadCounts>({ dropdown: 0 });
 	let messageDropdownOpen = $state(false);
 	let loading = $state(true);
@@ -59,6 +61,15 @@
 	);
 	let acceptedBookIds = $derived(new Set(acceptedTransactions.map((transaction) => transaction.book_id)));
 	let acceptedBooks = $derived(books.filter((book) => acceptedBookIds.has(book.id)));
+	let applyingBookIds = $derived(new Set(applicationMessages.map((message) => message.book_id)));
+	let applyingRows = $derived(
+		applicationMessages
+			.map((message) => ({
+				message,
+				book: books.find((book) => book.id === message.book_id)
+			}))
+			.filter((row): row is { message: ActivityMessage; book: Book } => !!row.book)
+	);
 	let archivedBookRows = $derived(
 		archivedTransactions
 			.map((transaction) => ({
@@ -79,6 +90,7 @@
 				)
 				.map((transaction) => transaction.book_id),
 			...acceptedBookIds,
+			...applyingBookIds,
 			...myBooks.map((book) => book.id)
 		])
 	);
@@ -109,7 +121,7 @@
 			]);
 			books = bookRows;
 			transactions = transactionRows;
-			await loadMessageActivity();
+			await Promise.all([loadMessageActivity(), loadApplications()]);
 		} catch (err) {
 			clearSession();
 			goto('/login');
@@ -135,7 +147,7 @@
 			member = latestMember;
 			books = bookRows;
 			transactions = transactionRows;
-			await loadMessageActivity();
+			await Promise.all([loadMessageActivity(), loadApplications()]);
 			if (messageDropdownOpen) await markDropdownViewed();
 		} catch {
 			// Keep the current shelves visible during brief backend/network gaps.
@@ -144,12 +156,23 @@
 		}
 	}
 
-	function openBook(book: Book, viewChatbox: boolean) {
-		goto(`/books/${book.id}?view_chatbox=${viewChatbox ? 'true' : 'false'}`);
+	function bookDetailUrl(
+		bookId: number,
+		tab: RouteTab,
+		options: { transactionId?: number | null; timestamp?: string } = {}
+	) {
+		const params = new URLSearchParams({ tab });
+		if (options.transactionId) params.set('transaction_id', String(options.transactionId));
+		if (options.timestamp) params.set('timestamp', options.timestamp);
+		return `/books/${bookId}?${params.toString()}`;
+	}
+
+	function openBook(book: Book, tab: RouteTab) {
+		goto(bookDetailUrl(book.id, tab));
 	}
 
 	function openArchivedBook(book: Book, transaction: Transaction) {
-		goto(`/books/${book.id}?transaction_id=${transaction.id}&view_chatbox=true`);
+		goto(bookDetailUrl(book.id, 'chatbox', { transactionId: transaction.id }));
 	}
 
 	function editBook(event: MouseEvent, book: Book) {
@@ -168,6 +191,15 @@
 			unreadCounts = unread;
 		} catch {
 			// Keep the current dropdown stable during brief backend/network gaps.
+		}
+	}
+
+	async function loadApplications() {
+		if (!member) return;
+		try {
+			applicationMessages = await apiFetch<ActivityMessage[]>(`/api/members/${member.id}/applications`);
+		} catch {
+			// Keep the current shelf stable during brief backend/network gaps.
 		}
 	}
 
@@ -193,7 +225,12 @@
 	}
 
 	function openActivityMessage(message: ActivityMessage) {
-		goto(`/books/${message.book_id}?transaction_id=${message.transaction_id}&view_chatbox=true`);
+		goto(
+			bookDetailUrl(message.book_id, message.notification_type ? 'notification' : 'chatbox', {
+				transactionId: message.transaction_id,
+				timestamp: message.timestamp
+			})
+		);
 	}
 
 	function logout() {
@@ -204,7 +241,7 @@
 
 {#snippet myBookCard(book: Book)}
 	<div class="book-card owned">
-		<button class="card-hitbox" type="button" onclick={() => openBook(book, true)}>
+		<button class="card-hitbox" type="button" onclick={() => openBook(book, 'chatbox')}>
 			{#if book.picture_path}
 				<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
 			{/if}
@@ -221,7 +258,7 @@
 {/snippet}
 
 {#snippet acceptedBookCard(book: Book)}
-	<button class="book-card accepted" type="button" onclick={() => openBook(book, true)}>
+	<button class="book-card accepted" type="button" onclick={() => openBook(book, 'chatbox')}>
 		{#if book.picture_path}
 			<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
 		{/if}
@@ -232,8 +269,24 @@
 	</button>
 {/snippet}
 
+{#snippet applyingBookCard(row: { message: ActivityMessage; book: Book })}
+	<button
+		class="book-card accepted"
+		type="button"
+		onclick={() => goto(bookDetailUrl(row.book.id, 'book info', { transactionId: row.message.transaction_id }))}
+	>
+		{#if row.book.picture_path}
+			<img class="book-thumb" src={mediaUrl(row.book.picture_path)} alt={row.book.title} />
+		{/if}
+		<span class="book-spine">{row.book.owner_name}</span>
+		<strong>{row.book.title}</strong>
+		<small>{row.book.author}</small>
+		<span class="pill">Applying as {row.message.applied_role}</span>
+	</button>
+{/snippet}
+
 {#snippet availableBookCard(book: Book)}
-	<button class="book-card available" type="button" onclick={() => openBook(book, false)}>
+	<button class="book-card available" type="button" onclick={() => openBook(book, 'book info')}>
 		{#if book.picture_path}
 			<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
 		{/if}
@@ -343,6 +396,15 @@
 			card={acceptedBookCard}
 			emptyText="No accepted exchanges yet."
 			countSuffix="active"
+		/>
+
+		<ListingSection
+			title="Applying"
+			items={applyingRows}
+			getBook={(row) => row.book}
+			card={applyingBookCard}
+			emptyText="No pending applications."
+			countSuffix="pending"
 		/>
 
 		<ListingSection

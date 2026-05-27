@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import {
 		ArrowLeft,
 		Bell,
@@ -13,6 +13,7 @@
 		MessageCircle,
 		Send,
 		Truck,
+		Undo2,
 		User,
 		UserMinus,
 		type Icon
@@ -29,11 +30,13 @@
 		type ApplicationStats,
 		type Member,
 		type MemberProfile,
+		type RequestBudget,
 		type Transaction,
 		type UnreadCounts
 	} from '$lib/api';
 
 	type DetailTab = 'info' | 'chat' | 'notification';
+	type RouteTab = 'book info' | 'chatbox' | 'notification';
 	type Role = 'requester' | 'courier';
 	type RoleName = 'owner' | Role;
 	const REALTIME_REFRESH_MS = 1800;
@@ -42,10 +45,12 @@
 	let book = $state<Book | null>(null);
 	let transaction = $state<Transaction | null>(null);
 	let messages = $state<ChatMessage[]>([]);
+	let pendingApplication = $state<ChatMessage | null>(null);
 	let applicationStats = $state<ApplicationStats>({
 		requester: { applying: 0, accepted: false, accepted_name: '' },
 		courier: { applying: 0, accepted: false, accepted_name: '' }
 	});
+	let requestBudget = $state<RequestBudget | null>(null);
 	let activeTab = $state<DetailTab>('info');
 	let loading = $state(true);
 	let busy = $state(false);
@@ -58,8 +63,15 @@
 	let unreadCounts = $state<UnreadCounts>({ dropdown: 0 });
 	let realtimeTimer: ReturnType<typeof setInterval> | null = null;
 	let realtimeRefreshInFlight = false;
+	let messageListElement = $state<HTMLDivElement | null>(null);
+	let pendingListElement = $state<HTMLDivElement | null>(null);
+	let lastScrollKey = '';
+	let lastRouteTabKey = '';
+	let lastAppliedRoleKey = '';
+	let hadAcceptedMembership = false;
 
-	let viewChatbox = $derived(page.url.searchParams.get('view_chatbox') === 'true');
+	let requestedTab = $derived(parseRouteTab(page.url.searchParams));
+	let requestedTimestamp = $derived(page.url.searchParams.get('timestamp') ?? '');
 	let routeTransactionId = $derived(Number(page.url.searchParams.get('transaction_id')) || null);
 	let isOwner = $derived(!!member && !!book && member.id === book.owner_id);
 	let readOnly = $derived(!!transaction?.archived);
@@ -74,23 +86,15 @@
 						: null
 			: null
 	);
-	let canViewChat = $derived((viewChatbox || readOnly) && acceptedRole !== null);
+	let canViewChat = $derived(acceptedRole !== null);
 	let chatboxLocked = $derived(!!transaction?.locked || !!transaction?.points_applied);
 	let notificationMessages = $derived(messages.filter((message) => message.notification_type !== null));
 	let selectedRoleStats = $derived(applicationStats[applyRole]);
 	let chatMessages = $derived(
 		messages.filter((message) => message.accepted && message.notification_type === null)
 	);
-	let hasApplied = $derived(
-		!!member &&
-			!!transaction &&
-			messages.some(
-				(message) =>
-					message.user_id === member?.id &&
-					message.transaction_id === transaction?.id &&
-					message.notification_type === 'join_request'
-		)
-	);
+	let requesterBudgetOk = $derived(applyRole !== 'requester' || requestBudget?.can_request !== false);
+	let canWithdrawSelectedRole = $derived(pendingApplication?.applied_role === applyRole);
 	let ownerInfoName = $derived(transaction?.owner_name || book?.owner_name || '');
 	let requesterInfoId = $derived(transaction?.requester_id ?? null);
 	let requesterInfoName = $derived(transaction?.requester_name || '');
@@ -101,12 +105,42 @@
 	let notificationUnread = $derived(unreadCounts.notification ?? 0);
 
 	$effect(() => {
+		if (!book || loading) return;
+		const routeTabKey = `${requestedTab}:${canViewChat}`;
+		if (routeTabKey === lastRouteTabKey) return;
+		lastRouteTabKey = routeTabKey;
+		activeTab = allowedDetailTab(requestedTab);
+	});
+
+	$effect(() => {
+		if (loading || activeTab === 'info') return;
+		const visibleMessages = activeTab === 'chat' ? chatMessages : notificationMessages;
+		const newestMessage = visibleMessages[visibleMessages.length - 1];
+		if (!newestMessage) return;
+		const scrollKey = `${activeTab}:${requestedTimestamp}:${visibleMessages.length}:${newestMessage.message_id}`;
+		if (scrollKey === lastScrollKey) return;
+		lastScrollKey = scrollKey;
+		tick().then(() => scrollToRequestedMessage(activeTab, requestedTimestamp));
+	});
+
+	$effect(() => {
 		if (!member || !book || selectedInfoMember) return;
 		if (canViewChat) {
 			selectedInfoMember = member;
 			return;
 		}
 		selectInfoMember(book.owner_id);
+	});
+
+	$effect(() => {
+		const appliedRoleKey = pendingApplication
+			? `${pendingApplication.message_id}:${pendingApplication.applied_role}`
+			: '';
+		if (appliedRoleKey === lastAppliedRoleKey) return;
+		lastAppliedRoleKey = appliedRoleKey;
+		if (pendingApplication?.applied_role === 'requester' || pendingApplication?.applied_role === 'courier') {
+			applyRole = pendingApplication.applied_role;
+		}
 	});
 
 	onMount(() => {
@@ -143,8 +177,15 @@
 					body: JSON.stringify({ book_id: book.id })
 				});
 			}
-			activeTab = canViewChat ? 'chat' : 'info';
-			await Promise.all([loadMessages(), loadApplicationStats(), loadUnreadCounts()]);
+			hadAcceptedMembership = !!acceptedRole;
+			activeTab = allowedDetailTab(requestedTab);
+			await Promise.all([
+				loadMessages(),
+				loadApplicationStats(),
+				loadUnreadCounts(),
+				loadRequestBudget(),
+				loadPendingApplication()
+			]);
 			await markVisibleActiveTab();
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to load this book';
@@ -180,15 +221,24 @@
 				return;
 			}
 
+			const wasAcceptedBeforeRefresh = hadAcceptedMembership;
 			transaction = latestTransaction;
-			if (shouldRedirectToChatbox(latestTransaction, latestMember)) return;
+			const isAcceptedAfterRefresh = !!memberRoleForTransaction(latestTransaction, latestMember.id);
+			hadAcceptedMembership = isAcceptedAfterRefresh;
+			if (shouldRedirectToChatbox(latestTransaction, latestMember, wasAcceptedBeforeRefresh)) return;
 			if (!transaction) {
 				messages = [];
 				resetApplicationStats();
 				return;
 			}
 
-			await Promise.all([loadMessages(), loadApplicationStats(), loadUnreadCounts()]);
+			await Promise.all([
+				loadMessages(),
+				loadApplicationStats(),
+				loadUnreadCounts(),
+				loadRequestBudget(),
+				loadPendingApplication()
+			]);
 			await markVisibleActiveTab();
 		} catch {
 			// Keep the current screen stable during brief backend/network gaps.
@@ -239,6 +289,37 @@
 		}
 	}
 
+	async function loadRequestBudget() {
+		if (!member || !book) {
+			requestBudget = null;
+			return;
+		}
+		try {
+			const params = new URLSearchParams(
+				transaction ? { transaction_id: String(transaction.id) } : { book_id: String(book.id) }
+			);
+			requestBudget = await apiFetch<RequestBudget>(
+				`/api/members/${member.id}/request-budget?${params.toString()}`
+			);
+		} catch {
+			requestBudget = null;
+		}
+	}
+
+	async function loadPendingApplication() {
+		if (!member || !transaction || canViewChat) {
+			pendingApplication = null;
+			return;
+		}
+		try {
+			pendingApplication = await apiFetch<ChatMessage | null>(
+				`/api/transactions/${transaction.id}/application?user_id=${member.id}`
+			);
+		} catch {
+			pendingApplication = null;
+		}
+	}
+
 	async function markActivity(tab: 'chatbox' | 'notification') {
 		if (!member || !transaction) return;
 		await apiFetch('/api/activity', {
@@ -280,6 +361,10 @@
 
 	async function applyToChatbox() {
 		if (!member || !book || readOnly) return;
+		if (applyRole === 'requester' && requestBudget?.can_request === false) {
+			error = `You need ${requestBudget.required_points} available points.`;
+			return;
+		}
 		busy = true;
 		error = '';
 		try {
@@ -297,6 +382,23 @@
 			await refreshRealtimeState(true);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to send application';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function withdrawApplication() {
+		if (!member || !transaction || readOnly || !canWithdrawSelectedRole) return;
+		busy = true;
+		error = '';
+		try {
+			await apiFetch(`/api/transactions/${transaction.id}/withdraw-application`, {
+				method: 'POST',
+				body: JSON.stringify({ user_id: member.id })
+			});
+			await refreshRealtimeState(true);
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Unable to withdraw application';
 		} finally {
 			busy = false;
 		}
@@ -449,16 +551,98 @@
 
 	function selectDetailTab(tab: DetailTab) {
 		activeTab = tab;
+		updateDetailRoute(tab);
 		markVisibleActiveTab();
 	}
 
-	function shouldRedirectToChatbox(latestTransaction: Transaction | null, latestMember: Member) {
-		if (!book || !latestTransaction || routeTransactionId || viewChatbox) return false;
-		const approvedRole =
-			latestMember.id === latestTransaction.requester_id || latestMember.id === latestTransaction.courier_id;
-		if (!approvedRole || latestMember.id === latestTransaction.owner_id) return false;
-		goto(`/books/${book.id}?view_chatbox=true`);
+	function shouldRedirectToChatbox(
+		latestTransaction: Transaction | null,
+		latestMember: Member,
+		wasAcceptedBeforeRefresh: boolean
+	) {
+		if (!book || !latestTransaction || routeTransactionId || requestedTab !== 'book info') return false;
+		const approvedRole = memberRoleForTransaction(latestTransaction, latestMember.id);
+		if (!approvedRole || approvedRole === 'owner' || wasAcceptedBeforeRefresh) return false;
+		goto(bookDetailUrl(book.id, 'chatbox'));
 		return true;
+	}
+
+	function memberRoleForTransaction(transaction: Transaction | null, memberId: number): RoleName | null {
+		if (!transaction) return null;
+		if (memberId === transaction.owner_id) return 'owner';
+		if (memberId === transaction.requester_id) return 'requester';
+		if (memberId === transaction.courier_id) return 'courier';
+		return null;
+	}
+
+	function parseRouteTab(params: URLSearchParams): RouteTab {
+		const value = params.get('tab');
+		if (value === 'chatbox' || value === 'notification' || value === 'book info') return value;
+		if (value === 'chat') return 'chatbox';
+		if (value === 'info') return 'book info';
+		if (params.get('view_chatbox') === 'true') return 'chatbox';
+		return 'book info';
+	}
+
+	function internalTab(tab: RouteTab): DetailTab {
+		if (tab === 'chatbox') return 'chat';
+		if (tab === 'notification') return 'notification';
+		return 'info';
+	}
+
+	function routeTab(tab: DetailTab): RouteTab {
+		if (tab === 'chat') return 'chatbox';
+		if (tab === 'notification') return 'notification';
+		return 'book info';
+	}
+
+	function allowedDetailTab(tab: RouteTab): DetailTab {
+		const nextTab = internalTab(tab);
+		if (nextTab !== 'info' && !canViewChat) return 'info';
+		return nextTab;
+	}
+
+	function bookDetailUrl(
+		bookId: number,
+		tab: RouteTab,
+		options: { transactionId?: number | null; timestamp?: string } = {}
+	) {
+		const params = new URLSearchParams({ tab });
+		if (options.transactionId) params.set('transaction_id', String(options.transactionId));
+		if (options.timestamp) params.set('timestamp', options.timestamp);
+		return `/books/${bookId}?${params.toString()}`;
+	}
+
+	function updateDetailRoute(tab: DetailTab) {
+		if (!book) return;
+		const transactionId = routeTransactionId ?? (readOnly ? transaction?.id : null);
+		goto(bookDetailUrl(book.id, routeTab(tab), { transactionId }), {
+			replaceState: true,
+			noScroll: true,
+			keepFocus: true
+		});
+	}
+
+	function targetMessage(messagesForTab: ChatMessage[], timestamp: string) {
+		if (messagesForTab.length === 0) return null;
+		const targetTime = Date.parse(timestamp);
+		if (!Number.isFinite(targetTime)) return messagesForTab[messagesForTab.length - 1] ?? null;
+		return messagesForTab.reduce((nearest, message) => {
+			const nearestDistance = Math.abs(Date.parse(nearest.timestamp) - targetTime);
+			const messageDistance = Math.abs(Date.parse(message.timestamp) - targetTime);
+			return messageDistance < nearestDistance ? message : nearest;
+		});
+	}
+
+	function scrollToRequestedMessage(tab: DetailTab, timestamp: string) {
+		const container = tab === 'chat' ? messageListElement : pendingListElement;
+		const messagesForTab = tab === 'chat' ? chatMessages : notificationMessages;
+		const message = targetMessage(messagesForTab, timestamp);
+		if (!container || !message) return;
+		const target = container.querySelector<HTMLElement>(`[data-message-id="${message.message_id}"]`);
+		if (!target) return;
+		const centeredTop = target.offsetTop - container.offsetTop - (container.clientHeight - target.clientHeight) / 2;
+		container.scrollTo({ top: Math.max(0, centeredTop), behavior: 'smooth' });
 	}
 
 	async function selectInfoMember(userId: number | null | undefined) {
@@ -589,7 +773,20 @@
 													: 'Open'}</strong
 											>
 										</div>
+										{#if applyRole === 'requester' && requestBudget}
+											<div>
+												<span>Available points</span>
+												<strong>{requestBudget.available_points}</strong>
+											</div>
+											<div>
+												<span>Needed</span>
+												<strong>{requestBudget.required_points}</strong>
+											</div>
+										{/if}
 									</div>
+									{#if applyRole === 'requester' && requestBudget?.can_request === false}
+										<p class="form-help">You need {requestBudget.required_points} available points.</p>
+									{/if}
 									<label>
 										Introduction note
 										<input
@@ -597,9 +794,27 @@
 											placeholder="Share pickup timing, location, or why you want this book"
 										/>
 									</label>
-									<button class="primary-action" disabled={busy || hasApplied} type="submit">
-										{hasApplied ? 'Application sent' : busy ? 'Sending...' : 'Apply'}
-									</button>
+									<div class="application-actions">
+										<button
+											class="primary-action icon-label"
+											disabled={busy || !requesterBudgetOk}
+											type="submit"
+										>
+											{#if !busy}
+												<Send size={18} />
+											{/if}
+											{busy ? 'Sending...' : 'Apply'}
+										</button>
+										<button
+											class="primary-action icon-label"
+											disabled={busy || !canWithdrawSelectedRole}
+											type="button"
+											onclick={withdrawApplication}
+										>
+											<Undo2 size={18} />
+											Withdraw
+										</button>
+									</div>
 								</form>
 							{:else if !isOwner && !canViewChat && chatboxLocked}
 								<p class="empty-state">This chatbox is locked for handoff.</p>
@@ -608,10 +823,14 @@
 							{/if}
 						</div>
 					{:else if activeTab === 'chat'}
-						<div class="message-list">
+						<div class="message-list" bind:this={messageListElement}>
 							{#each chatMessages as message}
 								{@const MessageRoleIcon = roleIcon(message.applied_role)}
-								<article class:mine={message.user_id === member?.id} class="message-bubble">
+								<article
+									class:mine={message.user_id === member?.id}
+									class="message-bubble"
+									data-message-id={message.message_id}
+								>
 									<strong>
 										<button class="inline-link" type="button" onclick={() => openProfile(message.user_id)}>
 											{message.user_name}
@@ -639,17 +858,17 @@
 								}}
 							>
 								<input bind:value={chatMessage} placeholder="Send a message" />
-								<button class="primary-action icon-label" disabled={busy} type="submit">
-									<Send size={18} />
+								<button class="primary-action" disabled={busy} type="submit">
+									<Send size={18} class="inline"/>
 									Send
 								</button>
 							</form>
 						{/if}
 					{:else}
-						<div class="pending-list">
+						<div class="pending-list" bind:this={pendingListElement}>
 							{#each notificationMessages as message}
 								{@const PendingRoleIcon = roleIcon(message.applied_role)}
-								<article class="pending-card">
+								<article class="pending-card" data-message-id={message.message_id}>
 									<div>
 										<p class="eyebrow role-label">
 											<PendingRoleIcon size={15} />
@@ -673,12 +892,12 @@
 									{#if canApproveNotification(message)}
 										<div class="pending-actions">
 											<button
-												class="primary-action icon-label"
+												class="primary-action"
 												disabled={busy || readOnly}
 												type="button"
 												onclick={() => approveNotification(message)}
 											>
-												<Check size={18} />
+												<Check size={18} class="inline"/>
 												Approve
 											</button>
 										</div>
