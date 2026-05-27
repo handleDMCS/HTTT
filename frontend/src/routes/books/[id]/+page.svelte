@@ -19,6 +19,7 @@
 	} from '@lucide/svelte';
 	import {
 		apiFetch,
+		formatTimestamp,
 		getStoredMember,
 		getToken,
 		mediaUrl,
@@ -27,7 +28,9 @@
 		type ChatMessage,
 		type ApplicationStats,
 		type Member,
-		type Transaction
+		type MemberProfile,
+		type Transaction,
+		type UnreadCounts
 	} from '$lib/api';
 
 	type DetailTab = 'info' | 'chat' | 'notification';
@@ -50,6 +53,9 @@
 	let applyRole = $state<Role>('requester');
 	let applyMessage = $state('');
 	let chatMessage = $state('');
+	let selectedInfoMember = $state<Member | null>(null);
+	let infoLoading = $state(false);
+	let unreadCounts = $state<UnreadCounts>({ dropdown: 0 });
 	let realtimeTimer: ReturnType<typeof setInterval> | null = null;
 	let realtimeRefreshInFlight = false;
 
@@ -83,8 +89,25 @@
 					message.user_id === member?.id &&
 					message.transaction_id === transaction?.id &&
 					message.notification_type === 'join_request'
-			)
+		)
 	);
+	let ownerInfoName = $derived(transaction?.owner_name || book?.owner_name || '');
+	let requesterInfoId = $derived(transaction?.requester_id ?? null);
+	let requesterInfoName = $derived(transaction?.requester_name || '');
+	let courierInfoId = $derived(transaction?.courier_id ?? null);
+	let courierInfoName = $derived(transaction?.courier_name || '');
+
+	let chatboxUnread = $derived(unreadCounts.chatbox ?? 0);
+	let notificationUnread = $derived(unreadCounts.notification ?? 0);
+
+	$effect(() => {
+		if (!member || !book || selectedInfoMember) return;
+		if (canViewChat) {
+			selectedInfoMember = member;
+			return;
+		}
+		selectInfoMember(book.owner_id);
+	});
 
 	onMount(() => {
 		if (!getToken()) {
@@ -121,7 +144,8 @@
 				});
 			}
 			activeTab = canViewChat ? 'chat' : 'info';
-			await Promise.all([loadMessages(), loadApplicationStats()]);
+			await Promise.all([loadMessages(), loadApplicationStats(), loadUnreadCounts()]);
+			await markVisibleActiveTab();
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Unable to load this book';
 		} finally {
@@ -143,6 +167,7 @@
 				apiFetch<Transaction[]>('/api/transactions')
 			]);
 			member = latestMember;
+			if (selectedInfoMember?.id === latestMember.id) selectedInfoMember = latestMember;
 			const latestTransaction = routeTransactionId
 				? transactionRows.find((row) => row.id === routeTransactionId) ?? null
 				: transactionRows.find((row) => row.book_id === book?.id && !row.archived) ?? null;
@@ -156,13 +181,15 @@
 			}
 
 			transaction = latestTransaction;
+			if (shouldRedirectToChatbox(latestTransaction, latestMember)) return;
 			if (!transaction) {
 				messages = [];
 				resetApplicationStats();
 				return;
 			}
 
-			await Promise.all([loadMessages(), loadApplicationStats()]);
+			await Promise.all([loadMessages(), loadApplicationStats(), loadUnreadCounts()]);
+			await markVisibleActiveTab();
 		} catch {
 			// Keep the current screen stable during brief backend/network gaps.
 		} finally {
@@ -195,6 +222,42 @@
 			);
 		} catch {
 			resetApplicationStats();
+		}
+	}
+
+	async function loadUnreadCounts() {
+		if (!member || !transaction) {
+			unreadCounts = { dropdown: 0 };
+			return;
+		}
+		try {
+			unreadCounts = await apiFetch<UnreadCounts>(
+				`/api/activity/unread?member_id=${member.id}&transaction_id=${transaction.id}`
+			);
+		} catch {
+			unreadCounts = { dropdown: 0 };
+		}
+	}
+
+	async function markActivity(tab: 'chatbox' | 'notification') {
+		if (!member || !transaction) return;
+		await apiFetch('/api/activity', {
+			method: 'POST',
+			body: JSON.stringify({
+				member_id: member.id,
+				transaction_id: transaction.id,
+				tab
+			})
+		});
+		await loadUnreadCounts();
+	}
+
+	async function markVisibleActiveTab() {
+		if (!canViewChat || activeTab === 'info') return;
+		try {
+			await markActivity(activeTab === 'chat' ? 'chatbox' : 'notification');
+		} catch {
+			// Unread badges should not interrupt chatbox use.
 		}
 	}
 
@@ -383,18 +446,74 @@
 	function openProfile(userId: number | null | undefined) {
 		if (userId) goto(`/profile/${userId}`);
 	}
+
+	function selectDetailTab(tab: DetailTab) {
+		activeTab = tab;
+		markVisibleActiveTab();
+	}
+
+	function shouldRedirectToChatbox(latestTransaction: Transaction | null, latestMember: Member) {
+		if (!book || !latestTransaction || routeTransactionId || viewChatbox) return false;
+		const approvedRole =
+			latestMember.id === latestTransaction.requester_id || latestMember.id === latestTransaction.courier_id;
+		if (!approvedRole || latestMember.id === latestTransaction.owner_id) return false;
+		goto(`/books/${book.id}?view_chatbox=true`);
+		return true;
+	}
+
+	async function selectInfoMember(userId: number | null | undefined) {
+		if (!userId) return;
+		if (member?.id === userId) {
+			selectedInfoMember = member;
+			return;
+		}
+		infoLoading = true;
+		try {
+			const profile = await apiFetch<MemberProfile>(`/api/members/${userId}/profile`);
+			selectedInfoMember = profile.member;
+		} catch {
+			// Keep the previous badge visible if this quick profile lookup fails.
+		} finally {
+			infoLoading = false;
+		}
+	}
 </script>
 
 <main class="detail-page">
 	<section class="chatbox-shell">
 		<div class="detail-topbar">
-			<button class="icon-button" type="button" aria-label="Back to books" onclick={() => goto('/books')}>
-				<ArrowLeft size={21} />
-			</button>
-			<div>
-				<p class="eyebrow">Book Exchange Club</p>
-				<h1>{book?.title ?? 'Book detail'}</h1>
+			<div class="detail-title-block">
+				<button class="icon-button" type="button" aria-label="Back to books" onclick={() => goto('/books')}>
+					<ArrowLeft size={21} />
+				</button>
+				<div>
+					<p class="eyebrow">Book Exchange Club</p>
+					<h1>{book?.title ?? 'Book detail'}</h1>
+				</div>
 			</div>
+			{#if book && !loading && !(error && !book)}
+				<div class="detail-tabs" aria-label="Book detail modes">
+					{#each ['info', 'chat', 'notification'] as tab}
+						{@const typedTab = tab as DetailTab}
+						{@const TabIcon = tabIcon(typedTab)}
+						{#if typedTab === 'info' || (typedTab === 'chat' && canViewChat) || (typedTab === 'notification' && canViewChat)}
+							<button
+								class:active={activeTab === typedTab}
+								type="button"
+								onclick={() => selectDetailTab(typedTab)}
+							>
+								<TabIcon size={18} />
+								<span>{typedTab === 'info' ? 'Book info' : typedTab === 'chat' ? 'Chatbox' : 'Notification'}</span>
+								{#if typedTab === 'chat' && chatboxUnread > 0}
+									<span class="unread-badge">{chatboxUnread}</span>
+								{:else if typedTab === 'notification' && notificationUnread > 0}
+									<span class="unread-badge">{notificationUnread}</span>
+								{/if}
+							</button>
+						{/if}
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		{#if loading}
@@ -402,23 +521,6 @@
 		{:else if error && !book}
 			<p class="empty-state">{error}</p>
 		{:else if book}
-			<div class="detail-tabs" aria-label="Book detail modes">
-				{#each ['info', 'chat', 'notification'] as tab}
-					{@const typedTab = tab as DetailTab}
-					{@const TabIcon = tabIcon(typedTab)}
-					{#if typedTab === 'info' || (typedTab === 'chat' && canViewChat) || (typedTab === 'notification' && canViewChat)}
-						<button
-							class:active={activeTab === typedTab}
-							type="button"
-							onclick={() => (activeTab = typedTab)}
-						>
-							<TabIcon size={18} />
-							{typedTab === 'info' ? 'Book info' : typedTab === 'chat' ? 'Chatbox' : 'Notification'}
-						</button>
-					{/if}
-				{/each}
-			</div>
-
 			<div class="chatbox-layout">
 				<section class="main-panel">
 					{#if activeTab === 'info'}
@@ -435,7 +537,7 @@
 									<span>{book.condition}</span>
 									<span>{book.exchange_mode}</span>
 									<span>
-										Owner:
+										Owner -
 										<button class="inline-link" type="button" onclick={() => openProfile(book?.owner_id)}>
 											{book.owner_name}
 										</button>
@@ -519,6 +621,9 @@
 											{roleLabel(message.applied_role)}
 										</span>
 									</strong>
+									<time class="message-time" datetime={message.timestamp}>
+										{formatTimestamp(message.timestamp)}
+									</time>
 									<p>{message.message}</p>
 								</article>
 							{:else}
@@ -556,6 +661,9 @@
 											</button>
 										</h2>
 										<p class="muted">{message.message}</p>
+										<time class="message-time" datetime={message.timestamp}>
+											{formatTimestamp(message.timestamp)}
+										</time>
 										{#if message.approver_role && !message.accepted}
 											<p class="muted">Waiting for {roleLabel(message.approver_role)} approval.</p>
 										{:else if message.approver_role && message.accepted}
@@ -584,43 +692,63 @@
 				</section>
 
 				<aside class="member-panel">
-					<p class="eyebrow">Your info</p>
+					<p class="eyebrow">Members</p>
+					<div class="handoff-status">
+						<p>
+							<strong class="role-label"><Crown size={15} /> Owner</strong>
+							<button class="member-handle" type="button" onclick={() => selectInfoMember(book?.owner_id)}>
+								{ownerInfoName}
+							</button>
+						</p>
+						<p>
+							<strong class="role-label"><User size={15} /> Requester</strong>
+							{#if requesterInfoId}
+								<button class="member-handle" type="button" onclick={() => selectInfoMember(requesterInfoId)}>
+									{requesterInfoName}
+								</button>
+							{:else}
+								<span class="role-empty">Open</span>
+							{/if}
+						</p>
+						<p>
+							<strong class="role-label"><Truck size={15} /> Courier</strong>
+							{#if courierInfoId}
+								<button class="member-handle" type="button" onclick={() => selectInfoMember(courierInfoId)}>
+									{courierInfoName}
+								</button>
+							{:else}
+								<span class="role-empty">None</span>
+							{/if}
+						</p>
+						<p>
+							<strong>Status</strong>
+							<span class="role-empty">{transaction?.archived ? 'Archived' : transaction?.locked ? 'Locked' : 'Open'}</span>
+						</p>
+					</div>
+
 					<div class="personal-info">
-						<strong>{member?.name}</strong>
-						<span>ID {member?.id}</span>
-						<span>{member?.email}</span>
-						<span>{member?.points ?? 0} pts</span>
-						<button class="ghost-button icon-label" type="button" onclick={() => openProfile(member?.id)}>
-							<User size={17} />
-							Profile
-						</button>
+						{#if infoLoading}
+							<span class="info-loading">Loading member...</span>
+						{:else if selectedInfoMember}
+							<div>
+								<strong>{selectedInfoMember.name}</strong>
+								<span>{selectedInfoMember.email}</span>
+							</div>
+							<div class="info-facts">
+								<span>{selectedInfoMember.gender}</span>
+								<span>{selectedInfoMember.age} years</span>
+								<span>{selectedInfoMember.points} pts</span>
+							</div>
+							<button class="ghost-button icon-label" type="button" onclick={() => openProfile(selectedInfoMember?.id)}>
+								<User size={17} />
+								Profile
+							</button>
+						{:else}
+							<span class="info-loading">Select a member.</span>
+						{/if}
 					</div>
 
 					{#if transaction}
-						<div class="handoff-status">
-							<p>
-								<strong class="role-label"><User size={15} /> Requester:</strong>
-								{#if transaction.requester_id}
-									<button class="inline-link" type="button" onclick={() => openProfile(transaction?.requester_id)}>
-										{transaction.requester_name}
-									</button>
-								{:else}
-									Open
-								{/if}
-							</p>
-							<p>
-								<strong class="role-label"><Truck size={15} /> Courier:</strong>
-								{#if transaction.courier_id}
-									<button class="inline-link" type="button" onclick={() => openProfile(transaction?.courier_id)}>
-										{transaction.courier_name}
-									</button>
-								{:else}
-									None
-								{/if}
-							</p>
-							<p><strong>Status:</strong> {transaction.archived ? 'Archived' : transaction.locked ? 'Locked' : 'Open'}</p>
-						</div>
-
 						{#if readOnly}
 							<p class="empty-state">Archived read-only room.</p>
 						{:else if acceptedRole === 'owner'}

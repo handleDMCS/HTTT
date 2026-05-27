@@ -70,6 +70,18 @@ export type ChatMessage = {
 	timestamp: string;
 };
 
+export type ActivityMessage = ChatMessage & {
+	book_id: number;
+	book_title: string;
+	transaction_archived: boolean;
+};
+
+export type UnreadCounts = {
+	dropdown: number;
+	chatbox?: number;
+	notification?: number;
+};
+
 export type RoleApplicationStats = {
 	applying: number;
 	accepted: boolean;
@@ -114,6 +126,15 @@ export function mediaUrl(path: string) {
 	if (!path) return '';
 	if (path.startsWith('http')) return path;
 	return `${API_BASE}${path}`;
+}
+
+export function formatTimestamp(timestamp: string) {
+	return new Intl.DateTimeFormat(undefined, {
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit'
+	}).format(new Date(timestamp));
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}) {

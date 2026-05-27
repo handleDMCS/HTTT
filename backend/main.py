@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import UniqueConstraint, text
 from sqlalchemy.engine import Connection
 from sqlmodel import Field, SQLModel, Session, create_engine, select
 
@@ -120,6 +120,17 @@ class Message(SQLModel, table=True):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class ActivityTracking(SQLModel, table=True):
+    __tablename__ = "activity_tracking"
+    __table_args__ = (UniqueConstraint("member_id", "transaction_id", "tab"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    member_id: int = Field(foreign_key="member.id")
+    transaction_id: Optional[int] = Field(default=None, foreign_key="transactions.id")
+    tab: str
+    last_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ApplyRequest(SQLModel):
     user_id: int
     applied_role: str
@@ -139,6 +150,12 @@ class NotificationCreate(SQLModel):
 
 class NotificationApproval(SQLModel):
     user_id: int
+
+
+class ActivityMark(SQLModel):
+    member_id: int
+    transaction_id: Optional[int] = None
+    tab: str
 
 
 class RoleApplicationStats(SQLModel):
@@ -608,6 +625,25 @@ def migrate_schema() -> None:
         if message_columns and "approver_role" not in message_columns:
             connection.execute(text("ALTER TABLE messages ADD COLUMN approver_role VARCHAR"))
 
+        if not table_exists(connection, "activity_tracking"):
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE activity_tracking (
+                        id INTEGER NOT NULL,
+                        member_id INTEGER NOT NULL,
+                        transaction_id INTEGER,
+                        tab VARCHAR NOT NULL,
+                        last_timestamp DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(member_id) REFERENCES member (id),
+                        FOREIGN KEY(transaction_id) REFERENCES transactions (id),
+                        UNIQUE(member_id, transaction_id, tab)
+                    )
+                    """
+                )
+            )
+
         if table_exists(connection, "exchangetransaction"):
             legacy_transaction_columns = get_table_columns(connection, "exchangetransaction")
             if table_exists(connection, "transactions"):
@@ -872,6 +908,130 @@ def message_to_dict(message: Message, member: Member) -> dict:
         "accepted": message.accepted,
         "timestamp": message.timestamp.isoformat(),
     }
+
+
+def message_to_activity_dict(session: Session, message: Message) -> dict:
+    transaction = get_transaction(session, message.transaction_id)
+    book = get_book(session, transaction.book_id)
+    row = message_to_dict(message, get_member(session, message.user_id))
+    row["book_id"] = book.id
+    row["book_title"] = book.title
+    row["transaction_archived"] = transaction.archived
+    return row
+
+
+def normalize_activity_tab(tab: str) -> str:
+    normalized = tab.strip().lower()
+    if normalized not in {"chatbox", "notification", "dropdown"}:
+        raise HTTPException(status_code=400, detail="tab must be chatbox, notification, or dropdown")
+    return normalized
+
+
+def visible_message_statement(session: Session, transaction: ExchangeTransaction, member_id: int):
+    role = member_role_in_transaction(session, transaction, member_id)
+    if role is None:
+        raise HTTPException(status_code=403, detail="Only accepted participants can view this chatbox")
+    statement = select(Message).where(Message.transaction_id == transaction.id)
+    if role != "owner":
+        statement = statement.where((Message.accepted == True) | (Message.notification_type != None))
+    return statement
+
+
+def member_transactions(session: Session, member_id: int) -> list[ExchangeTransaction]:
+    transactions = session.exec(select(ExchangeTransaction).order_by(ExchangeTransaction.id)).all()
+    return [transaction for transaction in transactions if member_role_in_transaction(session, transaction, member_id)]
+
+
+def message_scope_statement(
+    session: Session,
+    member_id: int,
+    tab: str,
+    transaction: Optional[ExchangeTransaction] = None,
+):
+    tab = normalize_activity_tab(tab)
+    if tab in {"chatbox", "notification"}:
+        if transaction is None:
+            raise HTTPException(status_code=400, detail="transaction_id is required for this tab")
+        statement = visible_message_statement(session, transaction, member_id)
+        if tab == "chatbox":
+            return statement.where(Message.notification_type == None, Message.accepted == True)
+        return statement.where(Message.notification_type != None)
+
+    transaction_ids = [row.id for row in member_transactions(session, member_id) if row.id is not None]
+    if not transaction_ids:
+        return select(Message).where(Message.message_id == -1)
+    return select(Message).where(Message.transaction_id.in_(transaction_ids))
+
+
+def get_activity_tracking(
+    session: Session,
+    member_id: int,
+    tab: str,
+    transaction_id: Optional[int],
+) -> Optional[ActivityTracking]:
+    return session.exec(
+        select(ActivityTracking).where(
+            ActivityTracking.member_id == member_id,
+            ActivityTracking.tab == tab,
+            ActivityTracking.transaction_id == transaction_id,
+        )
+    ).first()
+
+
+def activity_last_timestamp(
+    session: Session,
+    member_id: int,
+    tab: str,
+    transaction_id: Optional[int],
+) -> datetime:
+    row = get_activity_tracking(session, member_id, tab, transaction_id)
+    if row:
+        return row.last_timestamp
+    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def utc_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def unread_count(
+    session: Session,
+    member_id: int,
+    tab: str,
+    transaction_id: Optional[int] = None,
+) -> int:
+    tab = normalize_activity_tab(tab)
+    if tab == "dropdown":
+        last_timestamp = utc_timestamp(activity_last_timestamp(session, member_id, tab, None))
+        return len(
+            [
+                message
+                for message in visible_messages_for_dropdown(session, member_id)
+                if utc_timestamp(message.timestamp) > last_timestamp
+            ]
+        )
+
+    transaction = get_transaction(session, transaction_id) if transaction_id is not None else None
+    statement = message_scope_statement(session, member_id, tab, transaction)
+    last_timestamp = activity_last_timestamp(session, member_id, tab, transaction_id)
+    rows = session.exec(
+        statement.where(
+            Message.user_id != member_id,
+            Message.timestamp > last_timestamp,
+        )
+    ).all()
+    return len(rows)
+
+
+def visible_messages_for_dropdown(session: Session, member_id: int) -> list[Message]:
+    rows: list[Message] = []
+    for transaction in member_transactions(session, member_id):
+        rows.extend(
+            session.exec(visible_message_statement(session, transaction, member_id).where(Message.user_id != member_id)).all()
+        )
+    return sorted(rows, key=lambda message: (utc_timestamp(message.timestamp), message.message_id or 0), reverse=True)
 
 
 def application_stats_to_dict(session: Session, transaction: ExchangeTransaction) -> dict:
@@ -1284,6 +1444,21 @@ def get_member_profile(member_id: int) -> dict:
         }
 
 
+@app.get("/api/members/{member_id}/messages")
+def list_member_messages(member_id: int) -> list[dict]:
+    """
+    tl;dr: Return every visible message stream for a member, newest first, excluding their own messages.
+    input:
+    * member_id: member viewing the merged dropdown
+    output:
+    * visible message dictionaries with book context
+    """
+    with Session(engine) as session:
+        get_member(session, member_id)
+        messages = visible_messages_for_dropdown(session, member_id)
+        return [message_to_activity_dict(session, message) for message in messages]
+
+
 @app.put("/api/members/{member_id}/profile")
 def update_member_profile(
     member_id: int,
@@ -1584,6 +1759,67 @@ def list_messages(transaction_id: int, member_id: int) -> list[dict]:
 
         messages = session.exec(statement.order_by(Message.timestamp, Message.message_id)).all()
         return [message_to_dict(message, get_member(session, message.user_id)) for message in messages]
+
+
+@app.post("/api/activity")
+def mark_activity(payload: ActivityMark) -> dict:
+    """
+    tl;dr: Mark one member activity stream as viewed at the current time.
+    input:
+    * payload: member id, optional transaction id, and tab name
+    output:
+    * stored activity tracking row
+    """
+    tab = normalize_activity_tab(payload.tab)
+    transaction_id = None if tab == "dropdown" else payload.transaction_id
+    if tab != "dropdown" and transaction_id is None:
+        raise HTTPException(status_code=400, detail="transaction_id is required for this tab")
+
+    with Session(engine) as session:
+        get_member(session, payload.member_id)
+        transaction = get_transaction(session, transaction_id) if transaction_id is not None else None
+        if transaction is not None:
+            message_scope_statement(session, payload.member_id, tab, transaction)
+
+        activity = get_activity_tracking(session, payload.member_id, tab, transaction_id)
+        now = datetime.now(timezone.utc)
+        if activity is None:
+            activity = ActivityTracking(
+                member_id=payload.member_id,
+                transaction_id=transaction_id,
+                tab=tab,
+                last_timestamp=now,
+            )
+        else:
+            activity.last_timestamp = now
+        session.add(activity)
+        session.commit()
+        session.refresh(activity)
+        return {
+            "member_id": activity.member_id,
+            "transaction_id": activity.transaction_id,
+            "tab": activity.tab,
+            "last_timestamp": activity.last_timestamp.isoformat(),
+        }
+
+
+@app.get("/api/activity/unread")
+def get_unread_counts(member_id: int, transaction_id: Optional[int] = None) -> dict:
+    """
+    tl;dr: Return unread message counts for dropdown and optionally one transaction's tabs.
+    input:
+    * member_id: member viewing messages
+    * transaction_id: optional transaction for chatbox and notification counts
+    output:
+    * unread counts by tab
+    """
+    with Session(engine) as session:
+        get_member(session, member_id)
+        counts = {"dropdown": unread_count(session, member_id, "dropdown", None)}
+        if transaction_id is not None:
+            counts["chatbox"] = unread_count(session, member_id, "chatbox", transaction_id)
+            counts["notification"] = unread_count(session, member_id, "notification", transaction_id)
+        return counts
 
 
 @app.post("/api/transactions/{transaction_id}/notifications")

@@ -130,10 +130,6 @@
 			<button class="icon-button" type="button" aria-label="Back to books" onclick={() => goto('/books')}>
 				<ArrowLeft size={21} />
 			</button>
-			<div>
-				<p class="eyebrow">Member profile</p>
-				<h1>{profile?.member.name ?? 'Profile'}</h1>
-			</div>
 		</div>
 
 		{#if loading}
@@ -153,15 +149,15 @@
 							<span>{profile.member.email}</span>
 							<strong>{profile.member.points} pts</strong>
 						</div>
-						<p class="book-description">
-							{profile.member.biography || 'No biography yet.'}
-						</p>
 						{#if isOwnProfile && !editing}
 							<button class="ghost-button icon-label" type="button" onclick={startEditing}>
 								<Edit3 size={17} />
 								Edit profile
 							</button>
 						{/if}
+					</div>
+					<div class="profile-bio" aria-label="Biography">
+						<p>{profile.member.biography || 'No biography yet.'}</p>
 					</div>
 				</section>
 

@@ -1,18 +1,21 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { LogOut, Pencil, Plus, User } from '@lucide/svelte';
+	import { Bell, LogOut, Pencil, Plus, User, BookOpenTextIcon } from '@lucide/svelte';
 	import ListingSection from '$lib/components/ListingSection.svelte';
 	import {
 		apiFetch,
 		clearSession,
+		formatTimestamp,
 		getStoredMember,
 		getToken,
 		mediaUrl,
 		refreshMember,
+		type ActivityMessage,
 		type Book,
 		type Member,
-		type Transaction
+		type Transaction,
+		type UnreadCounts
 	} from '$lib/api';
 
 	const REALTIME_REFRESH_MS = 1800;
@@ -20,6 +23,9 @@
 	let member = $state<Member | null>(null);
 	let books = $state<Book[]>([]);
 	let transactions = $state<Transaction[]>([]);
+	let activityMessages = $state<ActivityMessage[]>([]);
+	let unreadCounts = $state<UnreadCounts>({ dropdown: 0 });
+	let messageDropdownOpen = $state(false);
 	let loading = $state(true);
 	let error = $state('');
 	let realtimeTimer: ReturnType<typeof setInterval> | null = null;
@@ -79,6 +85,7 @@
 	let availableBooks = $derived(
 		books.filter((book) => book.available && !unavailableBookIds.has(book.id))
 	);
+	let dropdownUnread = $derived(unreadCounts.dropdown ?? 0);
 
 	onMount(() => {
 		if (!getToken()) {
@@ -102,6 +109,7 @@
 			]);
 			books = bookRows;
 			transactions = transactionRows;
+			await loadMessageActivity();
 		} catch (err) {
 			clearSession();
 			goto('/login');
@@ -127,6 +135,8 @@
 			member = latestMember;
 			books = bookRows;
 			transactions = transactionRows;
+			await loadMessageActivity();
+			if (messageDropdownOpen) await markDropdownViewed();
 		} catch {
 			// Keep the current shelves visible during brief backend/network gaps.
 		} finally {
@@ -145,6 +155,45 @@
 	function editBook(event: MouseEvent, book: Book) {
 		event.stopPropagation();
 		goto(`/books/new?mode=edit&book_id=${book.id}`);
+	}
+
+	async function loadMessageActivity() {
+		if (!member) return;
+		try {
+			const [messageRows, unread] = await Promise.all([
+				apiFetch<ActivityMessage[]>(`/api/members/${member.id}/messages`),
+				apiFetch<UnreadCounts>(`/api/activity/unread?member_id=${member.id}`)
+			]);
+			activityMessages = messageRows;
+			unreadCounts = unread;
+		} catch {
+			// Keep the current dropdown stable during brief backend/network gaps.
+		}
+	}
+
+	async function markDropdownViewed() {
+		if (!member) return;
+		await apiFetch('/api/activity', {
+			method: 'POST',
+			body: JSON.stringify({
+				member_id: member.id,
+				transaction_id: null,
+				tab: 'dropdown'
+			})
+		});
+		unreadCounts = await apiFetch<UnreadCounts>(`/api/activity/unread?member_id=${member.id}`);
+	}
+
+	async function toggleMessageDropdown() {
+		messageDropdownOpen = !messageDropdownOpen;
+		if (messageDropdownOpen) {
+			await markDropdownViewed();
+			await loadMessageActivity();
+		}
+	}
+
+	function openActivityMessage(message: ActivityMessage) {
+		goto(`/books/${message.book_id}?transaction_id=${message.transaction_id}&view_chatbox=true`);
 	}
 
 	function logout() {
@@ -222,12 +271,44 @@
 	<header class="topbar">
 		<div>
 			<p class="eyebrow">Book Exchange Club</p>
-			<h1>Your exchange shelf</h1>
+			<h2>
+				<BookOpenTextIcon class="inline" size={35}></BookOpenTextIcon> In knowledge we trust
+			</h2>
 		</div>
 		<div class="account-block">
 			{#if member}
-				<span>{member.name}</span>
+				<p class="font-bold">{member.name}</p>
 				<strong>{member.points} pts</strong>
+				<div class="message-dropdown">
+					<button
+						class="ghost-button icon-label message-toggle"
+						type="button"
+						aria-expanded={messageDropdownOpen}
+						onclick={toggleMessageDropdown}
+					>
+						<Bell size={17} />
+						Messages
+						{#if dropdownUnread > 0}
+							<span class="unread-badge">{dropdownUnread}</span>
+						{/if}
+					</button>
+					{#if messageDropdownOpen}
+						<div class="message-dropdown-panel" aria-label="Recent messages">
+							{#each activityMessages as message}
+								<button class="message-dropdown-item" type="button" onclick={() => openActivityMessage(message)}>
+									<span>
+										<strong>{message.user_name}</strong>
+										<small>{message.book_title}</small>
+									</span>
+									<p>{message.message}</p>
+									<time datetime={message.timestamp}>{formatTimestamp(message.timestamp)}</time>
+								</button>
+							{:else}
+								<p class="empty-state">No messages yet.</p>
+							{/each}
+						</div>
+					{/if}
+				</div>
 				<button class="ghost-button icon-label" type="button" onclick={() => goto(`/profile/${member?.id}`)}>
 					<User size={17} />
 					Profile
