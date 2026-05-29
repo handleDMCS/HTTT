@@ -24,6 +24,7 @@
 		getStoredMember,
 		getToken,
 		mediaUrl,
+		parseApiTimestamp,
 		refreshMember,
 		type Book,
 		type ChatMessage,
@@ -39,7 +40,17 @@
 	type RouteTab = 'book info' | 'chatbox' | 'notification';
 	type Role = 'requester' | 'courier';
 	type RoleName = 'owner' | Role;
+	type ConfirmNotificationType =
+		| 'confirm_direct_handoff'
+		| 'confirm_handoff'
+		| 'confirm_delivered';
 	const REALTIME_REFRESH_MS = 1800;
+	const CONFIRM_NOTIFICATION_TIMEOUT_SECONDS = 60;
+	const CONFIRM_NOTIFICATION_TYPES = new Set<ChatMessage['notification_type']>([
+		'confirm_direct_handoff',
+		'confirm_handoff',
+		'confirm_delivered'
+	]);
 
 	let member = $state<Member | null>(null);
 	let book = $state<Book | null>(null);
@@ -62,7 +73,9 @@
 	let infoLoading = $state(false);
 	let unreadCounts = $state<UnreadCounts>({ dropdown: 0 });
 	let realtimeTimer: ReturnType<typeof setInterval> | null = null;
+	let countdownTimer: ReturnType<typeof setInterval> | null = null;
 	let realtimeRefreshInFlight = false;
+	let nowMs = $state(Date.now());
 	let messageListElement = $state<HTMLDivElement | null>(null);
 	let pendingListElement = $state<HTMLDivElement | null>(null);
 	let lastScrollKey = '';
@@ -150,10 +163,14 @@
 		}
 
 		member = getStoredMember();
+		countdownTimer = setInterval(() => {
+			nowMs = Date.now();
+		}, 1000);
 		loadPage().then(startRealtimeRefresh);
 
 		return () => {
 			if (realtimeTimer) clearInterval(realtimeTimer);
+			if (countdownTimer) clearInterval(countdownTimer);
 		};
 	});
 
@@ -485,8 +502,8 @@
 		}
 	}
 
-	async function createConfirmNotification(notificationType: ChatMessage['notification_type']) {
-		if (!member || !transaction || !notificationType || readOnly) return;
+	async function createConfirmNotification(notificationType: ConfirmNotificationType) {
+		if (!member || !transaction || readOnly || activeConfirmCooldown(notificationType)) return;
 		busy = true;
 		error = '';
 		try {
@@ -534,12 +551,53 @@
 		return 'Notification';
 	}
 
+	function isConfirmNotification(message: ChatMessage) {
+		return CONFIRM_NOTIFICATION_TYPES.has(message.notification_type);
+	}
+
+	function confirmCountdownRemaining(message: ChatMessage) {
+		const expiresAt = parseApiTimestamp(message.timestamp) + CONFIRM_NOTIFICATION_TIMEOUT_SECONDS * 1000;
+		return Math.max(0, Math.ceil((expiresAt - nowMs) / 1000));
+	}
+
+	function confirmCountdownProgress(message: ChatMessage) {
+		return (
+			(confirmCountdownRemaining(message) / CONFIRM_NOTIFICATION_TIMEOUT_SECONDS) * 100
+		).toFixed(2);
+	}
+
+	function confirmCountdownLabel(message: ChatMessage) {
+		const remaining = confirmCountdownRemaining(message);
+		return remaining > 0 ? `${remaining}s` : '0s';
+	}
+
+	function confirmTimedOut(message: ChatMessage) {
+		return isConfirmNotification(message) && !message.accepted && confirmCountdownRemaining(message) <= 0;
+	}
+
+	function activeConfirmCooldown(notificationType: ConfirmNotificationType) {
+		let activeMessage: ChatMessage | null = null;
+		for (const message of notificationMessages) {
+			if (
+				message.notification_type === notificationType &&
+				!message.accepted &&
+				message.approver_id !== null &&
+				message.approver_role !== null &&
+				confirmCountdownRemaining(message) > 0
+			) {
+				activeMessage = message;
+			}
+		}
+		return activeMessage;
+	}
+
 	function canApproveNotification(message: ChatMessage) {
 		return (
 			!!member &&
 			!!acceptedRole &&
 			!readOnly &&
 			!message.accepted &&
+			!confirmTimedOut(message) &&
 			message.approver_id === member.id &&
 			message.approver_role === acceptedRole
 		);
@@ -573,6 +631,11 @@
 		if (memberId === transaction.requester_id) return 'requester';
 		if (memberId === transaction.courier_id) return 'courier';
 		return null;
+	}
+
+	function selectedInfoRole() {
+		if (!selectedInfoMember) return null;
+		return memberRoleForTransaction(transaction, selectedInfoMember.id);
 	}
 
 	function parseRouteTab(params: URLSearchParams): RouteTab {
@@ -625,11 +688,11 @@
 
 	function targetMessage(messagesForTab: ChatMessage[], timestamp: string) {
 		if (messagesForTab.length === 0) return null;
-		const targetTime = Date.parse(timestamp);
+		const targetTime = parseApiTimestamp(timestamp);
 		if (!Number.isFinite(targetTime)) return messagesForTab[messagesForTab.length - 1] ?? null;
 		return messagesForTab.reduce((nearest, message) => {
-			const nearestDistance = Math.abs(Date.parse(nearest.timestamp) - targetTime);
-			const messageDistance = Math.abs(Date.parse(message.timestamp) - targetTime);
+			const nearestDistance = Math.abs(parseApiTimestamp(nearest.timestamp) - targetTime);
+			const messageDistance = Math.abs(parseApiTimestamp(message.timestamp) - targetTime);
 			return messageDistance < nearestDistance ? message : nearest;
 		});
 	}
@@ -662,6 +725,35 @@
 		}
 	}
 </script>
+
+{#snippet confirmRequestButton(
+	notificationType: ConfirmNotificationType,
+	label: string,
+	disabled = false
+)}
+	{@const cooldownMessage = activeConfirmCooldown(notificationType)}
+	<button
+		class="ghost-button icon-label confirm-request-button"
+		class:cooling-down={!!cooldownMessage}
+		disabled={busy || disabled || !!cooldownMessage}
+		type="button"
+		onclick={() => createConfirmNotification(notificationType)}
+	>
+		<Handshake size={18} />
+		<span>{label}</span>
+		{#if cooldownMessage}
+			<span
+				class="countdown-circle compact"
+				class:expired={confirmCountdownRemaining(cooldownMessage) <= 0}
+				style={`--countdown-progress: ${confirmCountdownProgress(cooldownMessage)}%;`}
+				aria-label={`Confirmation cooldown ends in ${confirmCountdownLabel(cooldownMessage)}`}
+				title={`Cooldown ends in ${confirmCountdownLabel(cooldownMessage)}`}
+			>
+				<span>{confirmCountdownLabel(cooldownMessage)}</span>
+			</span>
+		{/if}
+	</button>
+{/snippet}
 
 <main class="detail-page">
 	<section class="chatbox-shell">
@@ -883,12 +975,25 @@
 										<time class="message-time" datetime={message.timestamp}>
 											{formatTimestamp(message.timestamp)}
 										</time>
-										{#if message.approver_role && !message.accepted}
+										{#if confirmTimedOut(message) || (isConfirmNotification(message) && !message.accepted && !message.approver_role)}
+											<p class="muted">Expired.</p>
+										{:else if message.approver_role && !message.accepted}
 											<p class="muted">Waiting for {roleLabel(message.approver_role)} approval.</p>
 										{:else if message.approver_role && message.accepted}
 											<p class="muted">Approved.</p>
 										{/if}
 									</div>
+									{#if isConfirmNotification(message) && !message.accepted && message.approver_role}
+										<div
+											class:expired={confirmCountdownRemaining(message) <= 0}
+											class="countdown-circle"
+											style={`--countdown-progress: ${confirmCountdownProgress(message)}%;`}
+											aria-label={`Confirmation expires in ${confirmCountdownLabel(message)}`}
+											title={`Expires in ${confirmCountdownLabel(message)}`}
+										>
+											<span>{confirmCountdownLabel(message)}</span>
+										</div>
+									{/if}
 									{#if canApproveNotification(message)}
 										<div class="pending-actions">
 											<button
@@ -949,8 +1054,14 @@
 						{#if infoLoading}
 							<span class="info-loading">Loading member...</span>
 						{:else if selectedInfoMember}
+							{@const infoRole = selectedInfoRole()}
 							<div>
-								<strong>{selectedInfoMember.name}</strong>
+								<strong class="personal-name">
+									{selectedInfoMember.name}
+									{#if infoRole}
+										<span>({roleLabel(infoRole)})</span>
+									{/if}
+								</strong>
 								<span>{selectedInfoMember.email}</span>
 							</div>
 							<div class="info-facts">
@@ -994,68 +1105,40 @@
 								</button>
 							{/if}
 							{#if transaction.courier_id}
-								<button
-									class="ghost-button icon-label"
-									disabled={busy || transaction.owner_confirmed}
-									type="button"
-									onclick={() => createConfirmNotification('confirm_handoff')}
-								>
-									<Handshake size={18} />
-									Request courier handoff
-								</button>
+								{@render confirmRequestButton(
+									'confirm_handoff',
+									'Request courier handoff',
+									transaction.owner_confirmed
+								)}
 							{:else if transaction.requester_id}
-								<button
-									class="ghost-button icon-label"
-									disabled={busy || transaction.points_applied}
-									type="button"
-									onclick={() => createConfirmNotification('confirm_direct_handoff')}
-								>
-									<Handshake size={18} />
-									Request direct handoff
-								</button>
+								{@render confirmRequestButton(
+									'confirm_direct_handoff',
+									'Request direct handoff',
+									transaction.points_applied
+								)}
 							{/if}
 						{:else if acceptedRole === 'courier'}
 							{#if !transaction.owner_confirmed}
-								<button
-									class="ghost-button icon-label"
-									disabled={busy}
-									type="button"
-									onclick={() => createConfirmNotification('confirm_handoff')}
-								>
-									<Handshake size={18} />
-									Request owner pickup
-								</button>
+								{@render confirmRequestButton('confirm_handoff', 'Request owner pickup')}
 							{:else}
-								<button
-									class="ghost-button icon-label"
-									disabled={busy || transaction.requester_confirmed || !transaction.requester_id}
-									type="button"
-									onclick={() => createConfirmNotification('confirm_delivered')}
-								>
-									<Handshake size={18} />
-									Request delivery approval
-								</button>
+								{@render confirmRequestButton(
+									'confirm_delivered',
+									'Request delivery approval',
+									transaction.requester_confirmed || !transaction.requester_id
+								)}
 							{/if}
 						{:else if acceptedRole === 'requester' && !transaction.courier_id}
-							<button
-								class="ghost-button icon-label"
-								disabled={busy || transaction.points_applied}
-								type="button"
-								onclick={() => createConfirmNotification('confirm_direct_handoff')}
-							>
-								<Handshake size={18} />
-								Request direct handoff
-							</button>
+							{@render confirmRequestButton(
+								'confirm_direct_handoff',
+								'Request direct handoff',
+								transaction.points_applied
+							)}
 						{:else if acceptedRole === 'requester' && transaction.courier_id && transaction.owner_confirmed}
-							<button
-								class="ghost-button icon-label"
-								disabled={busy || transaction.requester_confirmed}
-								type="button"
-								onclick={() => createConfirmNotification('confirm_delivered')}
-							>
-								<Handshake size={18} />
-								Request delivery approval
-							</button>
+							{@render confirmRequestButton(
+								'confirm_delivered',
+								'Request delivery approval',
+								transaction.requester_confirmed
+							)}
 						{/if}
 
 						{#if acceptedRole && acceptedRole !== 'owner'}

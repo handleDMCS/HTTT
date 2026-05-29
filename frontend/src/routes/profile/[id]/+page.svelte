@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import { ArrowLeft, Edit3, Save, X } from '@lucide/svelte';
 	import ListingSection from '$lib/components/ListingSection.svelte';
 	import {
@@ -126,12 +127,6 @@
 
 <main class="profile-page">
 	<section class="profile-shell">
-		<div class="profile-topbar">
-			<button class="icon-button" type="button" aria-label="Back to books" onclick={() => goto('/books')}>
-				<ArrowLeft size={21} />
-			</button>
-		</div>
-
 		{#if loading}
 			<p class="empty-state">Loading profile...</p>
 		{:else if error && !profile}
@@ -164,6 +159,7 @@
 				{#if isOwnProfile && editing}
 					<form
 						class="profile-edit-form"
+						transition:slide={{ duration: 180 }}
 						onsubmit={(event) => {
 							event.preventDefault();
 							saveProfile();

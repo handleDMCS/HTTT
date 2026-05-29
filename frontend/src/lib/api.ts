@@ -139,13 +139,18 @@ export function mediaUrl(path: string) {
 	return `${API_BASE}${path}`;
 }
 
+export function parseApiTimestamp(timestamp: string) {
+	const hasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(timestamp);
+	return Date.parse(hasTimezone ? timestamp : `${timestamp}Z`);
+}
+
 export function formatTimestamp(timestamp: string) {
 	return new Intl.DateTimeFormat(undefined, {
 		month: 'short',
 		day: 'numeric',
 		hour: '2-digit',
 		minute: '2-digit'
-	}).format(new Date(timestamp));
+	}).format(new Date(parseApiTimestamp(timestamp)));
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}) {

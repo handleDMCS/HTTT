@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { ArrowLeft, Save, Trash2 } from '@lucide/svelte';
+	import { ArrowLeft, Save } from '@lucide/svelte';
 	import {
 		apiFetch,
 		getStoredMember,
@@ -9,8 +9,7 @@
 		mediaUrl,
 		refreshMember,
 		type Book,
-		type Member,
-		type Transaction
+		type Member
 	} from '$lib/api';
 
 	let member = $state<Member | null>(null);
@@ -26,8 +25,6 @@
 	let pictureFile = $state<File | null>(null);
 	let existingPicturePath = $state('');
 	let loading = $state(false);
-	let deleting = $state(false);
-	let deleteBlocked = $state(false);
 	let error = $state('');
 	let previewUrl = $derived(pictureFile ? URL.createObjectURL(pictureFile) : mediaUrl(existingPicturePath));
 
@@ -43,16 +40,10 @@
 
 		if (mode === 'edit' && bookId) {
 			try {
-				const [books, transactions] = await Promise.all([
-					apiFetch<Book[]>('/api/books'),
-					apiFetch<Transaction[]>('/api/transactions')
-				]);
+				const books = await apiFetch<Book[]>('/api/books');
 				const book = books.find((row) => row.id === bookId);
 				if (!book) throw new Error('Book not found');
 				if (member && book.owner_id !== member.id) throw new Error('Only the owner can edit this book');
-				deleteBlocked = transactions.some(
-					(transaction) => transaction.book_id === book.id && (transaction.locked || transaction.archived)
-				);
 				title = book.title;
 				genre = book.genre;
 				author = book.author;
@@ -107,23 +98,6 @@
 		}
 	}
 
-	async function deleteBook() {
-		if (!member || !bookId || deleteBlocked) return;
-		if (!window.confirm('Delete this book listing?')) return;
-		error = '';
-		deleting = true;
-
-		try {
-			await apiFetch<{ deleted: boolean }>(`/api/books/${bookId}?owner_id=${member.id}`, {
-				method: 'DELETE'
-			});
-			goto('/books');
-		} catch (err) {
-			error = err instanceof Error ? err.message : 'Unable to delete book';
-		} finally {
-			deleting = false;
-		}
-	}
 </script>
 
 <main class="form-page">
@@ -134,7 +108,7 @@
 			</button>
 			<div>
 				<p class="eyebrow">{mode === 'edit' ? 'Edit listing' : 'New listing'}</p>
-				<h1>{mode === 'edit' ? 'Update book' : 'Add a book'}</h1>
+				<h1>{mode === 'edit' ? 'Edit book details' : 'Add a book'}</h1>
 			</div>
 		</div>
 
@@ -205,22 +179,6 @@
 				{/if}
 				{loading ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Create listing'}
 			</button>
-			{#if mode === 'edit'}
-				<button
-					class="danger-action icon-label"
-					disabled={loading || deleting || deleteBlocked}
-					type="button"
-					onclick={deleteBook}
-				>
-					{#if !deleting}
-						<Trash2 size={18} />
-					{/if}
-					{deleting ? 'Deleting...' : 'Delete book'}
-				</button>
-				{#if deleteBlocked}
-					<p class="muted">This book cannot be deleted because its transaction is locked or archived.</p>
-				{/if}
-			{/if}
 		</form>
 	</section>
 </main>

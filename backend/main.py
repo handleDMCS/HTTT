@@ -553,6 +553,7 @@ CONFIRM_NOTIFICATION_TYPES = {
     "confirm_handoff",
     "confirm_delivered",
 }
+CONFIRM_NOTIFICATION_TIMEOUT_SECONDS = 60
 
 
 def migrate_schema() -> None:
@@ -875,6 +876,7 @@ def requester_budget_exposure(session: Session, member_id: int, exclude_transact
             Message.accepted == False,
             ExchangeTransaction.points_applied == False,
             ExchangeTransaction.archived == False,
+            ExchangeTransaction.locked == False,
         )
     ).all()
     for _, transaction in pending_requests:
@@ -995,6 +997,65 @@ def validate_approval_pair(approver_id: Optional[int], approver_role: Optional[s
         raise HTTPException(status_code=400, detail="approver_id and approver_role must both be set or both be empty")
 
 
+def utc_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def utc_isoformat(value: datetime) -> str:
+    return utc_timestamp(value).isoformat().replace("+00:00", "Z")
+
+
+def confirm_notification_expired(message: Message, now: Optional[datetime] = None) -> bool:
+    if message.notification_type not in CONFIRM_NOTIFICATION_TYPES or message.accepted:
+        return False
+    checked_at = now or datetime.now(timezone.utc)
+    expires_at = utc_timestamp(message.timestamp) + timedelta(seconds=CONFIRM_NOTIFICATION_TIMEOUT_SECONDS)
+    return checked_at >= expires_at
+
+
+def expire_confirm_notifications(
+    session: Session,
+    transaction_id: Optional[int] = None,
+    message: Optional[Message] = None,
+) -> bool:
+    """
+    tl;dr: Clear stale confirmation approvers after the short in-person approval window.
+    input:
+    * session: active database session
+    * transaction_id: optional transaction scope to expire
+    * message: optional single message to inspect
+    output:
+    * whether any notification was changed
+    """
+    if message is not None:
+        candidates = [message]
+    else:
+        statement = select(Message).where(
+            Message.notification_type.in_(CONFIRM_NOTIFICATION_TYPES),
+            Message.accepted == False,
+            Message.approver_id != None,
+            Message.approver_role != None,
+        )
+        if transaction_id is not None:
+            statement = statement.where(Message.transaction_id == transaction_id)
+        candidates = session.exec(statement).all()
+
+    now = datetime.now(timezone.utc)
+    changed = False
+    for candidate in candidates:
+        if candidate.approver_id is None and candidate.approver_role is None:
+            continue
+        if not confirm_notification_expired(candidate, now):
+            continue
+        candidate.approver_id = None
+        candidate.approver_role = None
+        session.add(candidate)
+        changed = True
+    return changed
+
+
 def add_message(
     session: Session,
     transaction_id: int,
@@ -1102,7 +1163,7 @@ def message_to_dict(message: Message, member: Member) -> dict:
         "approver_id": message.approver_id,
         "approver_role": message.approver_role,
         "accepted": message.accepted,
-        "timestamp": message.timestamp.isoformat(),
+        "timestamp": utc_isoformat(message.timestamp),
     }
 
 
@@ -1184,12 +1245,6 @@ def activity_last_timestamp(
     if row:
         return row.last_timestamp
     return datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-
-def utc_timestamp(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def unread_count(
@@ -1337,10 +1392,44 @@ def complete_transaction_if_ready(session: Session, transaction: ExchangeTransac
 
     transaction.points_applied = True
     transaction.archived = True
-    transaction.locked = True
+    lock_transaction(session, transaction)
     session.add(owner)
     session.add(requester)
     session.add(transaction)
+
+
+def delete_transaction_join_requests(session: Session, transaction_id: int) -> int:
+    """
+    tl;dr: Delete every pending role application for a transaction.
+    input:
+    * session: active database session
+    * transaction_id: transaction whose join requests should be removed
+    output:
+    * number of deleted join request messages
+    """
+    messages = session.exec(
+        select(Message).where(
+            Message.transaction_id == transaction_id,
+            Message.notification_type == "join_request",
+        )
+    ).all()
+    for message in messages:
+        session.delete(message)
+    return len(messages)
+
+
+def lock_transaction(session: Session, transaction: ExchangeTransaction) -> None:
+    """
+    tl;dr: Lock a transaction and release any pending requester/courier applications.
+    input:
+    * session: active database session
+    * transaction: transaction being locked
+    output:
+    * None
+    """
+    transaction.locked = True
+    if transaction.id is not None:
+        delete_transaction_join_requests(session, transaction.id)
 
 
 def member_id_for_role(transaction: ExchangeTransaction, role: str) -> Optional[int]:
@@ -1421,6 +1510,8 @@ def create_participant_notification(
     default_message = message_text
 
     if notification_type in CONFIRM_NOTIFICATION_TYPES:
+        if expire_confirm_notifications(session, transaction.id):
+            session.flush()
         accepted = False
         if notification_type == "confirm_direct_handoff":
             if transaction.courier_id is not None:
@@ -1448,6 +1539,17 @@ def create_participant_notification(
         approver_id = member_id_for_role(transaction, approver_role)
         if approver_id is None:
             raise HTTPException(status_code=400, detail="Required approver is not in this chatbox")
+        existing_confirmation = session.exec(
+            select(Message).where(
+                Message.transaction_id == transaction.id,
+                Message.notification_type == notification_type,
+                Message.accepted == False,
+                Message.approver_id != None,
+                Message.approver_role != None,
+            )
+        ).first()
+        if existing_confirmation is not None:
+            raise HTTPException(status_code=400, detail="A confirmation request is already pending")
     else:
         default_message = default_message or f"{member.name} created a {notification_type.replace('_', ' ')} notification."
 
@@ -1467,6 +1569,8 @@ def create_participant_notification(
 def approve_notification(session: Session, transaction: ExchangeTransaction, notification: Message, user_id: int) -> None:
     if notification.notification_type is None:
         raise HTTPException(status_code=400, detail="Message is not a notification")
+    if expire_confirm_notifications(session, message=notification):
+        raise HTTPException(status_code=400, detail="Confirmation request expired")
     if notification.approver_id is None or notification.approver_role is None:
         raise HTTPException(status_code=400, detail="Notification does not require approval")
     if notification.accepted:
@@ -1524,7 +1628,7 @@ def approve_notification(session: Session, transaction: ExchangeTransaction, not
         complete_transaction_if_ready(session, transaction)
     elif notification.notification_type == "confirm_handoff":
         transaction.owner_confirmed = True
-        transaction.locked = True
+        lock_transaction(session, transaction)
         notification.accepted = True
     elif notification.notification_type == "confirm_delivered":
         if not transaction.owner_confirmed:
@@ -1865,6 +1969,63 @@ def create_book(
         return book_to_dict(new_book, owner)
 
 
+@app.post("/api/books/{book_id}/renew")
+def renew_loan_book(book_id: int, owner_id: int) -> dict:
+    """
+    tl;dr: Clone an archived loan book into a fresh independent listing.
+    input:
+    * book_id: archived loan book to copy
+    * owner_id: owner requesting renewal
+    output:
+    * newly created book dictionary with owner details
+    """
+    with Session(engine) as session:
+        source = get_book(session, book_id)
+        if source.owner_id != owner_id:
+            raise HTTPException(status_code=403, detail="Only the owner can renew this book")
+        if source.exchange_mode != "loan":
+            raise HTTPException(status_code=400, detail="Only loan books can be renewed")
+
+        archived_transaction = session.exec(
+            select(ExchangeTransaction).where(
+                ExchangeTransaction.book_id == source.id,
+                ExchangeTransaction.owner_id == owner_id,
+                ExchangeTransaction.archived == True,
+            )
+        ).first()
+        if archived_transaction is None:
+            raise HTTPException(status_code=400, detail="Only archived loan books can be renewed")
+
+        owner = get_member(session, owner_id)
+        renewed = Book(
+            owner_id=source.owner_id,
+            title=source.title,
+            genre=source.genre,
+            author=source.author,
+            description=source.description,
+            publication_year=source.publication_year,
+            condition=source.condition,
+            exchange_mode=source.exchange_mode,
+            available=True,
+            picture_path=source.picture_path,
+        )
+        session.add(renewed)
+        session.commit()
+        session.refresh(renewed)
+
+        transaction = ExchangeTransaction(
+            book_id=renewed.id,
+            owner_id=owner.id,
+            exchange_mode=renewed.exchange_mode,
+        )
+        session.add(transaction)
+        session.commit()
+        session.refresh(transaction)
+        add_message(session, transaction.id, owner.id, "owner", f"Renewed loan listing: {renewed.title}", True)
+        session.commit()
+        return book_to_dict(renewed, owner)
+
+
 @app.put("/api/books/{book_id}")
 def update_book(
     book_id: int,
@@ -1919,7 +2080,7 @@ def update_book(
 @app.delete("/api/books/{book_id}")
 def delete_book(book_id: int, owner_id: int) -> dict:
     """
-    tl;dr: Delete one owner-owned book unless its transaction is locked or archived.
+    tl;dr: Delete one owner-owned book only while its chatbox has no accepted participants.
     input:
     * book_id: book being deleted
     * owner_id: member who owns the book
@@ -1932,6 +2093,8 @@ def delete_book(book_id: int, owner_id: int) -> dict:
             raise HTTPException(status_code=403, detail="Only the owner can delete this book")
 
         transactions = session.exec(select(ExchangeTransaction).where(ExchangeTransaction.book_id == book.id)).all()
+        if any(transaction.requester_id is not None or transaction.courier_id is not None for transaction in transactions):
+            raise HTTPException(status_code=400, detail="Remove all chatbox participants before deleting this book")
         if any(transaction.locked or transaction.archived for transaction in transactions):
             raise HTTPException(status_code=400, detail="Locked or archived books cannot be deleted")
 
@@ -2017,6 +2180,8 @@ def list_messages(transaction_id: int, member_id: int) -> list[dict]:
         role = member_role_in_transaction(session, transaction, member_id)
         if role is None:
             raise HTTPException(status_code=403, detail="Only accepted participants can view this chatbox")
+        if expire_confirm_notifications(session, transaction_id):
+            session.commit()
 
         statement = select(Message).where(Message.transaction_id == transaction_id)
         if role != "owner":
@@ -2064,7 +2229,7 @@ def mark_activity(payload: ActivityMark) -> dict:
             "member_id": activity.member_id,
             "transaction_id": activity.transaction_id,
             "tab": activity.tab,
-            "last_timestamp": activity.last_timestamp.isoformat(),
+            "last_timestamp": utc_isoformat(activity.last_timestamp),
         }
 
 
@@ -2080,6 +2245,8 @@ def get_unread_counts(member_id: int, transaction_id: Optional[int] = None) -> d
     """
     with Session(engine) as session:
         get_member(session, member_id)
+        if expire_confirm_notifications(session, transaction_id):
+            session.commit()
         counts = {"dropdown": unread_count(session, member_id, "dropdown", None)}
         if transaction_id is not None:
             counts["chatbox"] = unread_count(session, member_id, "chatbox", transaction_id)
@@ -2127,6 +2294,9 @@ def approve_transaction_notification(transaction_id: int, message_id: int, paylo
         notification = session.get(Message, message_id)
         if not notification or notification.transaction_id != transaction_id:
             raise HTTPException(status_code=404, detail="Notification not found")
+        if expire_confirm_notifications(session, message=notification):
+            session.commit()
+            raise HTTPException(status_code=400, detail="Confirmation request expired")
         approve_notification(session, transaction, notification, payload.user_id)
         session.commit()
         session.refresh(transaction)
@@ -2437,7 +2607,7 @@ def confirm_meeting(payload: MeetingConfirm) -> dict:
             user_ids == expected_direct_handoff and transaction.courier_id is None
         ):
             transaction.owner_confirmed = True
-            transaction.locked = True
+            lock_transaction(session, transaction)
             if user_ids == expected_direct_handoff and transaction.courier_id is None:
                 transaction.requester_confirmed = True
         elif user_ids == expected_requester_handoff:

@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { Bell, LogOut, Pencil, Plus, User, BookOpenTextIcon } from '@lucide/svelte';
+	import { Pencil, Plus, RotateCcw, X } from '@lucide/svelte';
 	import ListingSection from '$lib/components/ListingSection.svelte';
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
 	import {
 		apiFetch,
 		clearSession,
-		formatTimestamp,
 		getStoredMember,
 		getToken,
 		mediaUrl,
@@ -14,8 +14,7 @@
 		type ActivityMessage,
 		type Book,
 		type Member,
-		type Transaction,
-		type UnreadCounts
+		type Transaction
 	} from '$lib/api';
 
 	const REALTIME_REFRESH_MS = 1800;
@@ -24,12 +23,14 @@
 	let member = $state<Member | null>(null);
 	let books = $state<Book[]>([]);
 	let transactions = $state<Transaction[]>([]);
-	let activityMessages = $state<ActivityMessage[]>([]);
 	let applicationMessages = $state<ActivityMessage[]>([]);
-	let unreadCounts = $state<UnreadCounts>({ dropdown: 0 });
-	let messageDropdownOpen = $state(false);
 	let loading = $state(true);
 	let error = $state('');
+	let renewingBookId = $state<number | null>(null);
+	let renewTarget = $state<{ transaction: Transaction; book: Book } | null>(null);
+	let deletingBookId = $state<number | null>(null);
+	let deleteTarget = $state<Book | null>(null);
+	let blockedDeleteTarget = $state<Book | null>(null);
 	let realtimeTimer: ReturnType<typeof setInterval> | null = null;
 	let realtimeRefreshInFlight = false;
 
@@ -84,9 +85,7 @@
 				.filter(
 					(transaction) =>
 						transaction.archived ||
-						transaction.locked ||
-						transaction.points_applied ||
-						(transaction.requester_id !== null && transaction.courier_id !== null)
+						transaction.locked
 				)
 				.map((transaction) => transaction.book_id),
 			...acceptedBookIds,
@@ -97,7 +96,6 @@
 	let availableBooks = $derived(
 		books.filter((book) => book.available && !unavailableBookIds.has(book.id))
 	);
-	let dropdownUnread = $derived(unreadCounts.dropdown ?? 0);
 
 	onMount(() => {
 		if (!getToken()) {
@@ -121,7 +119,7 @@
 			]);
 			books = bookRows;
 			transactions = transactionRows;
-			await Promise.all([loadMessageActivity(), loadApplications()]);
+			await loadApplications();
 		} catch (err) {
 			clearSession();
 			goto('/login');
@@ -147,8 +145,7 @@
 			member = latestMember;
 			books = bookRows;
 			transactions = transactionRows;
-			await Promise.all([loadMessageActivity(), loadApplications()]);
-			if (messageDropdownOpen) await markDropdownViewed();
+			await loadApplications();
 		} catch {
 			// Keep the current shelves visible during brief backend/network gaps.
 		} finally {
@@ -180,17 +177,79 @@
 		goto(`/books/new?mode=edit&book_id=${book.id}`);
 	}
 
-	async function loadMessageActivity() {
-		if (!member) return;
+	function bookHasParticipants(book: Book) {
+		return transactions.some(
+			(transaction) =>
+				transaction.book_id === book.id &&
+				(transaction.requester_id !== null || transaction.courier_id !== null)
+		);
+	}
+
+	function requestDeleteBook(book: Book) {
+		if (bookHasParticipants(book)) {
+			blockedDeleteTarget = book;
+			return;
+		}
+		deleteTarget = book;
+	}
+
+	function openDeleteBlockedChatbox() {
+		if (!blockedDeleteTarget) return;
+		const book = blockedDeleteTarget;
+		blockedDeleteTarget = null;
+		goto(bookDetailUrl(book.id, 'chatbox'));
+	}
+
+	async function confirmDeleteBook() {
+		if (!member || !deleteTarget) return;
+		const book = deleteTarget;
+		deletingBookId = book.id;
+		error = '';
 		try {
-			const [messageRows, unread] = await Promise.all([
-				apiFetch<ActivityMessage[]>(`/api/members/${member.id}/messages`),
-				apiFetch<UnreadCounts>(`/api/activity/unread?member_id=${member.id}`)
-			]);
-			activityMessages = messageRows;
-			unreadCounts = unread;
-		} catch {
-			// Keep the current dropdown stable during brief backend/network gaps.
+			await apiFetch<{ deleted: boolean }>(`/api/books/${book.id}?owner_id=${member.id}`, {
+				method: 'DELETE'
+			});
+			deleteTarget = null;
+			await refreshRealtimeShelves();
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Unable to delete this book';
+		} finally {
+			deletingBookId = null;
+		}
+	}
+
+	function canRenewArchivedLoan(row: { transaction: Transaction; book: Book }) {
+		return (
+			row.book.exchange_mode === 'loan' &&
+			row.transaction.archived &&
+			!!member &&
+			member.id === row.transaction.owner_id &&
+			member.id === row.book.owner_id
+		);
+	}
+
+	function requestRenewLoanBook(row: { transaction: Transaction; book: Book }) {
+		if (!canRenewArchivedLoan(row)) return;
+		renewTarget = row;
+	}
+
+	async function confirmRenewLoanBook() {
+		if (!renewTarget || !canRenewArchivedLoan(renewTarget)) return;
+		const row = renewTarget;
+		const book = row.book;
+		const ownerId = row.transaction.owner_id;
+		renewingBookId = book.id;
+		error = '';
+		try {
+			await apiFetch<Book>(`/api/books/${book.id}/renew?owner_id=${ownerId}`, {
+				method: 'POST'
+			});
+			await refreshRealtimeShelves();
+			renewTarget = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Unable to renew this book';
+		} finally {
+			renewingBookId = null;
 		}
 	}
 
@@ -203,44 +262,25 @@
 		}
 	}
 
-	async function markDropdownViewed() {
-		if (!member) return;
-		await apiFetch('/api/activity', {
-			method: 'POST',
-			body: JSON.stringify({
-				member_id: member.id,
-				transaction_id: null,
-				tab: 'dropdown'
-			})
-		});
-		unreadCounts = await apiFetch<UnreadCounts>(`/api/activity/unread?member_id=${member.id}`);
-	}
-
-	async function toggleMessageDropdown() {
-		messageDropdownOpen = !messageDropdownOpen;
-		if (messageDropdownOpen) {
-			await markDropdownViewed();
-			await loadMessageActivity();
-		}
-	}
-
-	function openActivityMessage(message: ActivityMessage) {
-		goto(
-			bookDetailUrl(message.book_id, message.notification_type ? 'notification' : 'chatbox', {
-				transactionId: message.transaction_id,
-				timestamp: message.timestamp
-			})
-		);
-	}
-
-	function logout() {
-		clearSession();
-		goto('/login');
+	function exchangeModeLabel(mode: string) {
+		if (mode === 'permanent') return 'Permanent';
+		if (mode === 'loan') return 'Loan';
+		return mode;
 	}
 </script>
 
 {#snippet myBookCard(book: Book)}
 	<div class="book-card owned">
+		<button
+			class="card-delete-button"
+			type="button"
+			aria-label={`Delete ${book.title}`}
+			title={bookHasParticipants(book) ? 'Remove all chatbox participants before deleting' : 'Delete book'}
+			disabled={deletingBookId === book.id}
+			onclick={() => requestDeleteBook(book)}
+		>
+			<X size={17} />
+		</button>
 		<button class="card-hitbox" type="button" onclick={() => openBook(book, 'chatbox')}>
 			{#if book.picture_path}
 				<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
@@ -248,7 +288,9 @@
 			<span class="book-spine">{book.genre}</span>
 			<strong>{book.title}</strong>
 			<small>{book.author}</small>
-			<span class="pill">{book.exchange_mode}</span>
+			<span class="tag-row">
+				<span class="pill">{exchangeModeLabel(book.exchange_mode)}</span>
+			</span>
 		</button>
 		<button class="edit-button icon-label" type="button" onclick={(event) => editBook(event, book)}>
 			<Pencil size={17} />
@@ -265,7 +307,10 @@
 		<span class="book-spine">{book.owner_name}</span>
 		<strong>{book.title}</strong>
 		<small>{book.author}</small>
-		<span class="pill">Chatbox open</span>
+		<span class="tag-row">
+			<span class="pill">{exchangeModeLabel(book.exchange_mode)}</span>
+			<span class="pill">Chatbox open</span>
+		</span>
 	</button>
 {/snippet}
 
@@ -281,36 +326,56 @@
 		<span class="book-spine">{row.book.owner_name}</span>
 		<strong>{row.book.title}</strong>
 		<small>{row.book.author}</small>
-		<span class="pill">Applying as {row.message.applied_role}</span>
+		<span class="tag-row">
+			<span class="pill">{exchangeModeLabel(row.book.exchange_mode)}</span>
+			<span class="pill">Applying as {row.message.applied_role}</span>
+		</span>
 	</button>
 {/snippet}
 
 {#snippet availableBookCard(book: Book)}
-	<button class="book-card available" type="button" onclick={() => openBook(book, 'book info')}>
-		{#if book.picture_path}
-			<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
-		{/if}
-		<span class="book-spine">{book.condition}</span>
-		<strong>{book.title}</strong>
-		<small>{book.author}</small>
-		<span class="pill">By {book.owner_name}</span>
-	</button>
+	<div class="book-card available">
+		<button class="card-hitbox" type="button" onclick={() => openBook(book, 'book info')}>
+			{#if book.picture_path}
+				<img class="book-thumb" src={mediaUrl(book.picture_path)} alt={book.title} />
+			{/if}
+			<span class="book-spine">{book.condition}</span>
+			<strong>{book.title}</strong>
+			<small>{book.author}</small>
+			<span class="tag-row">
+				<span class="pill">{exchangeModeLabel(book.exchange_mode)}</span>
+			</span>
+		</button>
+		<a class="book-owner-link" href={`/profile/${book.owner_id}`}>{book.owner_name}</a>
+	</div>
 {/snippet}
 
 {#snippet archivedBookCard(row: { transaction: Transaction; book: Book })}
-	<button
-		class="book-card accepted"
-		type="button"
-		onclick={() => openArchivedBook(row.book, row.transaction)}
-	>
-		{#if row.book.picture_path}
-			<img class="book-thumb" src={mediaUrl(row.book.picture_path)} alt={row.book.title} />
+	<div class="book-card accepted">
+		<button class="card-hitbox" type="button" onclick={() => openArchivedBook(row.book, row.transaction)}>
+			{#if row.book.picture_path}
+				<img class="book-thumb" src={mediaUrl(row.book.picture_path)} alt={row.book.title} />
+			{/if}
+			<span class="book-spine">{row.transaction.courier_name || 'Direct handoff'}</span>
+			<strong>{row.book.title}</strong>
+			<small>{row.book.author}</small>
+			<span class="tag-row">
+				<span class="pill">{exchangeModeLabel(row.book.exchange_mode)}</span>
+				<span class="pill">Archived</span>
+			</span>
+		</button>
+		{#if canRenewArchivedLoan(row)}
+			<button
+				class="renew-button icon-label"
+				disabled={renewingBookId === row.book.id}
+				type="button"
+				onclick={() => requestRenewLoanBook(row)}
+			>
+				<RotateCcw size={17} />
+				{renewingBookId === row.book.id ? 'Renewing...' : 'Renew'}
+			</button>
 		{/if}
-		<span class="book-spine">{row.transaction.courier_name || 'Direct handoff'}</span>
-		<strong>{row.book.title}</strong>
-		<small>{row.book.author}</small>
-		<span class="pill">Archived</span>
-	</button>
+	</div>
 {/snippet}
 
 {#snippet newBookAction()}
@@ -321,59 +386,6 @@
 {/snippet}
 
 <main class="app-shell">
-	<header class="topbar">
-		<div>
-			<p class="eyebrow">Book Exchange Club</p>
-			<h2>
-				<BookOpenTextIcon class="inline" size={35}></BookOpenTextIcon> In knowledge we trust
-			</h2>
-		</div>
-		<div class="account-block">
-			{#if member}
-				<p class="font-bold">{member.name}</p>
-				<strong>{member.points} pts</strong>
-				<div class="message-dropdown">
-					<button
-						class="ghost-button icon-label message-toggle"
-						type="button"
-						aria-expanded={messageDropdownOpen}
-						onclick={toggleMessageDropdown}
-					>
-						<Bell size={17} />
-						Messages
-						{#if dropdownUnread > 0}
-							<span class="unread-badge">{dropdownUnread}</span>
-						{/if}
-					</button>
-					{#if messageDropdownOpen}
-						<div class="message-dropdown-panel" aria-label="Recent messages">
-							{#each activityMessages as message}
-								<button class="message-dropdown-item" type="button" onclick={() => openActivityMessage(message)}>
-									<span>
-										<strong>{message.user_name}</strong>
-										<small>{message.book_title}</small>
-									</span>
-									<p>{message.message}</p>
-									<time datetime={message.timestamp}>{formatTimestamp(message.timestamp)}</time>
-								</button>
-							{:else}
-								<p class="empty-state">No messages yet.</p>
-							{/each}
-						</div>
-					{/if}
-				</div>
-				<button class="ghost-button icon-label" type="button" onclick={() => goto(`/profile/${member?.id}`)}>
-					<User size={17} />
-					Profile
-				</button>
-			{/if}
-			<button class="ghost-button icon-label" type="button" onclick={logout}>
-				<LogOut size={17} />
-				Log out
-			</button>
-		</div>
-	</header>
-
 	{#if loading}
 		<section class="empty-state">Loading books...</section>
 	{:else if error}
@@ -426,3 +438,41 @@
 		/>
 	{/if}
 </main>
+
+{#if renewTarget}
+	<ConfirmModal
+		title="Renew loan listing?"
+		message={`Create a new independent loan listing for "${renewTarget.book.title}". The archived transaction, chatbox, and notifications will stay unchanged.`}
+		confirmLabel="Renew"
+		busy={renewingBookId === renewTarget.book.id}
+		onCancel={() => {
+			if (renewingBookId === null) renewTarget = null;
+		}}
+		onConfirm={confirmRenewLoanBook}
+	/>
+{/if}
+
+{#if deleteTarget}
+	<ConfirmModal
+		title="Delete book listing?"
+		message={`Delete "${deleteTarget.title}" and its empty chatbox data? This action cannot be undone.`}
+		confirmLabel="Delete"
+		tone="danger"
+		busy={deletingBookId === deleteTarget.id}
+		onCancel={() => {
+			if (deletingBookId === null) deleteTarget = null;
+		}}
+		onConfirm={confirmDeleteBook}
+	/>
+{/if}
+
+{#if blockedDeleteTarget}
+	<ConfirmModal
+		title="Cannot delete yet"
+		message={`"${blockedDeleteTarget.title}" still has people in its chatbox. Remove the requester and courier before deleting this book.`}
+		cancelLabel="Close"
+		confirmLabel="Open chatbox"
+		onCancel={() => (blockedDeleteTarget = null)}
+		onConfirm={openDeleteBlockedChatbox}
+	/>
+{/if}

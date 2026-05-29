@@ -1,6 +1,7 @@
 <script lang="ts" generics="T">
 	import { ChevronLeft, ChevronRight, Search, SlidersHorizontal } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
+	import { slide } from 'svelte/transition';
 	import type { Book } from '$lib/api';
 
 	type Props<T> = {
@@ -150,7 +151,7 @@
 	</div>
 
 	{#if filtersOpen}
-		<div class="listing-filters" aria-label={`${title} filters`}>
+		<div class="listing-filters" aria-label={`${title} filters`} transition:slide={{ duration: 180 }}>
 			<label>
 				Condition
 				<select bind:value={condition}>
