@@ -1,0 +1,32 @@
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#dbeafe", "primaryBorderColor": "#1d4ed8", "lineColor": "#0f172a", "fontFamily": "Arial"}, "flowchart": {"curve": "basis", "nodeSpacing": 78, "rankSpacing": 100}}}%%
+flowchart LR
+    Participants[Owner / Requester / Courier]
+    P41((4.1 Tao yeu cau xac nhan))
+    P42((4.2 Duyet thong bao xac nhan))
+    P43((4.3 Khoa chatbox))
+    P44((4.4 Ap dung diem))
+    P45((4.5 Archive giao dich va khoa sach))
+    D1[(Member.points)]
+    D2[(Book.available)]
+    D3[(ExchangeTransaction)]
+    D4[(Message)]
+
+    Participants --> P41
+    Participants --> P42
+    P41 --> D4
+    P42 <--> D4
+    P42 --> P43
+    P43 <--> D3
+    P43 -->|enough confirmations| P44
+    P44 <-->|+/- points| D1
+    P44 <--> D3
+    P44 --> P45
+    P45 <--> D2
+    P45 <--> D3
+
+    classDef actor fill:#ffffff,stroke:#111827,stroke-width:2px,color:#111827;
+    classDef process fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827;
+    classDef store fill:#fef3c7,stroke:#92400e,stroke-width:2px,color:#111827;
+    class Participants actor;
+    class P41,P42,P43,P44,P45 process;
+    class D1,D2,D3,D4 store;

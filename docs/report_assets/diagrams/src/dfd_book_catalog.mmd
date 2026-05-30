@@ -1,0 +1,40 @@
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#dbeafe", "primaryBorderColor": "#1d4ed8", "lineColor": "#0f172a", "fontFamily": "Arial"}, "flowchart": {"curve": "basis", "nodeSpacing": 78, "rankSpacing": 100}}}%%
+flowchart LR
+    Owner[Chu sach]
+    Member[Thanh vien]
+    P21((2.1 Tao sach))
+    P22((2.2 Sua sach))
+    P23((2.3 Xoa sach))
+    P24((2.4 Liet ke/tim loc sach))
+    P25((2.5 Gia han sach cho muon))
+    D2[(Book)]
+    D3[(ExchangeTransaction)]
+    D4[(Message)]
+    Pic[(pic/)]
+
+    Owner --> P21
+    Owner --> P22
+    Owner --> P23
+    Owner --> P25
+    Member --> P24
+    P24 --> Member
+
+    P21 --> D2
+    P21 --> Pic
+    P21 --> D3
+    P21 --> D4
+    P22 <--> D2
+    P23 <--> D2
+    P23 --> D3
+    P23 --> D4
+    P24 <-->|read/filter| D2
+    P25 <--> D2
+    P25 --> D3
+    P25 --> D4
+
+    classDef actor fill:#ffffff,stroke:#111827,stroke-width:2px,color:#111827;
+    classDef process fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827;
+    classDef store fill:#fef3c7,stroke:#92400e,stroke-width:2px,color:#111827;
+    class Owner,Member actor;
+    class P21,P22,P23,P24,P25 process;
+    class D2,D3,D4,Pic store;

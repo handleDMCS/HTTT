@@ -18,6 +18,7 @@
 		UserMinus,
 		type Icon
 	} from '@lucide/svelte';
+	import { formatPointDelta, transactionPointChanges } from '$lib/points';
 	import {
 		apiFetch,
 		formatTimestamp,
@@ -113,6 +114,7 @@
 	let requesterInfoName = $derived(transaction?.requester_name || '');
 	let courierInfoId = $derived(transaction?.courier_id ?? null);
 	let courierInfoName = $derived(transaction?.courier_name || '');
+	let archivePointChanges = $derived(transaction ? transactionPointChanges(transaction) : []);
 
 	let chatboxUnread = $derived(unreadCounts.chatbox ?? 0);
 	let notificationUnread = $derived(unreadCounts.notification ?? 0);
@@ -1097,6 +1099,19 @@
 					{#if transaction}
 						{#if readOnly}
 							<p class="empty-state">Archived read-only room.</p>
+							<div class="archive-point-summary" aria-label="Archived point changes">
+								{#each archivePointChanges as pointChange}
+									<div
+										class:negative={pointChange.delta < 0}
+										class:positive={pointChange.delta > 0}
+										class="archive-point-row"
+									>
+										<span>{pointChange.role}</span>
+										<strong>{formatPointDelta(pointChange.delta)}</strong>
+										<small>{pointChange.name}</small>
+									</div>
+								{/each}
+							</div>
 						{:else if acceptedRole === 'owner'}
 							{#if transaction.requester_id}
 								<button

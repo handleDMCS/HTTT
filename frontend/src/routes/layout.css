@@ -809,6 +809,18 @@ textarea:focus {
 		color var(--motion-fast);
 }
 
+.point-pill.positive {
+	border-color: #b8d9c4;
+	background: #f3fbf6;
+	color: #2f6f4f;
+}
+
+.point-pill.negative {
+	border-color: #efc2b4;
+	background: #fff7f4;
+	color: #9f3f28;
+}
+
 .tag-row {
 	display: flex;
 	flex-wrap: wrap;
@@ -820,6 +832,20 @@ textarea:focus {
 .book-card:focus-within .pill {
 	border-color: #d97757;
 	background: #fff9f6;
+	color: #9f3f28;
+}
+
+.book-card:hover .point-pill.positive,
+.book-card:focus-within .point-pill.positive {
+	border-color: #b8d9c4;
+	background: #f3fbf6;
+	color: #2f6f4f;
+}
+
+.book-card:hover .point-pill.negative,
+.book-card:focus-within .point-pill.negative {
+	border-color: #efc2b4;
+	background: #fff7f4;
 	color: #9f3f28;
 }
 
@@ -1548,6 +1574,52 @@ textarea:focus {
 .handoff-status strong {
 	color: rgba(29, 29, 25, 0.68);
 	font-size: 0.9rem;
+}
+
+.archive-point-summary {
+	display: grid;
+	gap: 8px;
+}
+
+.archive-point-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 2px 8px;
+	border: 1px solid #e5ddd9;
+	border-radius: 4px;
+	background: #ffffff;
+	padding: 8px 10px;
+}
+
+.archive-point-row span {
+	color: rgba(29, 29, 25, 0.62);
+	font-size: 0.76rem;
+	font-weight: 800;
+	text-transform: uppercase;
+}
+
+.archive-point-row strong {
+	justify-self: end;
+	color: rgba(29, 29, 25, 0.74);
+	font-size: 0.95rem;
+	line-height: 1.25;
+}
+
+.archive-point-row small {
+	grid-column: 1 / -1;
+	min-width: 0;
+	color: rgba(29, 29, 25, 0.64);
+	font-size: 0.85rem;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.archive-point-row.positive strong {
+	color: #2f6f4f;
+}
+
+.archive-point-row.negative strong {
+	color: #9f3f28;
 }
 
 .member-handle {

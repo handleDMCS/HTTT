@@ -1,0 +1,51 @@
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#dbeafe", "primaryBorderColor": "#1d4ed8", "lineColor": "#0f172a", "fontFamily": "Arial"}, "flowchart": {"curve": "basis", "nodeSpacing": 64, "rankSpacing": 92}}}%%
+flowchart LR
+    Member[Thanh vien]
+    Courier[Nguoi giao sach]
+    D1[(D1 Member)]
+    D2[(D2 Book)]
+    D3[(D3 ExchangeTransaction)]
+    D4[(D4 Message)]
+    D5[(D5 ActivityTracking)]
+
+    P1((1.0 Quan ly tai khoan va ho so))
+    P2((2.0 Quan ly danh muc sach))
+    P3((3.0 Quan ly chatbox va ung tuyen))
+    P4((4.0 Xac nhan giao nhan va cap nhat diem))
+    P5((5.0 Theo doi hoat dong va thong bao))
+
+    Member --> P1
+    P1 --> Member
+    P1 <-->|du lieu thanh vien| D1
+
+    Member --> P2
+    P2 --> Member
+    P2 <-->|book CRUD| D2
+    P2 <-->|mo transaction| D3
+
+    Member --> P3
+    Courier --> P3
+    P3 <-->|member/role| D1
+    P3 <-->|participant state| D3
+    P3 <-->|message/notification| D4
+    P3 --> Member
+    P3 --> Courier
+
+    Member --> P4
+    Courier --> P4
+    P4 <-->|points| D1
+    P4 <-->|available| D2
+    P4 <-->|locked/archive| D3
+    P4 <-->|confirm messages| D4
+
+    P5 <-->|message stream| D4
+    P5 <-->|last read| D5
+    P5 --> Member
+    P5 --> Courier
+
+    classDef actor fill:#ffffff,stroke:#111827,stroke-width:2px,color:#111827;
+    classDef process fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#111827;
+    classDef store fill:#fef3c7,stroke:#92400e,stroke-width:2px,color:#111827;
+    class Member,Courier actor;
+    class P1,P2,P3,P4,P5 process;
+    class D1,D2,D3,D4,D5 store;

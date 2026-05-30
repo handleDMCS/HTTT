@@ -1,0 +1,1711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book Exchange Club - Hackathon Presentation</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --surface: #ffffff;
+      --surface-soft: #f9fafb;
+      --border: #e5e7eb;
+      --text: #1a1a2e;
+      --muted: #6b7280;
+      --tertiary: #9ca3af;
+      --accent: #2563eb;
+      --positive: #10b981;
+      --negative: #ef4444;
+      --amber: #f59e0b;
+      --purple: #8b5cf6;
+      --ink: #111827;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    .deck {
+      position: relative;
+      width: min(100vw, calc(100vh * 16 / 9));
+      height: min(100vh, calc(100vw * 9 / 16));
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(229, 231, 235, 0.52) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(229, 231, 235, 0.52) 1px, transparent 1px),
+        var(--surface);
+      background-size: 40px 40px;
+      box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
+    }
+
+    .slide {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: flex-start;
+      text-align: left; padding: 54px 72px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.3s ease;
+      overflow: hidden;
+    }
+
+    .slide.active {
+      opacity: 1; pointer-events: auto; z-index: 2;
+    }
+
+    /* Stagger animation for child elements */
+    .slide.active .a {
+      opacity: 0;
+      animation: fadeInUp 0.4s ease forwards;
+    }
+    .a:nth-child(1) { animation-delay: 0.05s; }
+    .a:nth-child(2) { animation-delay: 0.1s; }
+    .a:nth-child(3) { animation-delay: 0.15s; }
+    .a:nth-child(4) { animation-delay: 0.2s; }
+    .a:nth-child(5) { animation-delay: 0.25s; }
+    .a:nth-child(6) { animation-delay: 0.3s; }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 1000px;
+      font-size: 58px;
+      line-height: 1.02;
+      letter-spacing: 0;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    h2 {
+      max-width: 1000px;
+      font-size: 42px;
+      line-height: 1.12;
+      letter-spacing: 0;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    h3 {
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    .lead {
+      max-width: 870px;
+      margin-top: 18px;
+      font-size: 23px;
+      line-height: 1.45;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .overline {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      color: var(--accent);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      line-height: 1.2;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .overline::before {
+      content: "";
+      width: 30px;
+      height: 3px;
+      border-radius: 3px;
+      background: var(--accent);
+    }
+
+    .mono {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .content {
+      width: 100%;
+      max-width: 100%;
+      margin-top: 30px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+      width: 100%;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      width: 100%;
+    }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      width: 100%;
+    }
+
+    .card,
+    .stat-card,
+    .panel {
+      border: 1px solid var(--border);
+      background: rgba(249, 250, 251, 0.92);
+      border-radius: 8px;
+      box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .card {
+      padding: 22px;
+      min-height: 150px;
+    }
+
+    .card p,
+    .panel p,
+    .step p,
+    .state-box p {
+      margin-top: 10px;
+      font-size: 17px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+
+    .card .tag,
+    .label {
+      display: inline-block;
+      margin-bottom: 12px;
+      font-family: "JetBrains Mono", monospace;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .stat-card {
+      padding: 20px;
+      min-height: 124px;
+    }
+
+    .stat-card strong {
+      display: block;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 34px;
+      line-height: 1;
+      color: var(--ink);
+    }
+
+    .stat-card span {
+      display: block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.35;
+      font-weight: 650;
+    }
+
+    .trend {
+      margin-top: 12px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .trend.positive { color: var(--positive); }
+    .trend.negative { color: var(--negative); }
+    .trend.neutral { color: var(--accent); }
+
+    .team-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      width: 760px;
+      max-width: 100%;
+      margin-top: 42px;
+    }
+
+    .member-card {
+      padding: 22px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+    }
+
+    .member-card span {
+      display: block;
+      color: var(--accent);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .member-card strong {
+      font-size: 22px;
+      line-height: 1.25;
+      color: var(--ink);
+    }
+
+    .team-name {
+      display: inline-flex;
+      margin-top: 20px;
+      padding: 9px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #eff6ff;
+      color: var(--accent);
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 700;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      width: 100%;
+    }
+
+    .compare-col {
+      padding: 26px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+    }
+
+    .compare-col.problem {
+      border-top: 5px solid var(--negative);
+    }
+
+    .compare-col.solution {
+      border-top: 5px solid var(--positive);
+    }
+
+    .bullet-list {
+      display: grid;
+      gap: 11px;
+      padding: 0;
+      margin: 18px 0 0;
+      list-style: none;
+    }
+
+    .bullet-list li {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 10px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.35;
+    }
+
+    .bullet-list li::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      margin-top: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: 1fr 34px 1fr 34px 1fr 34px 1fr;
+      align-items: stretch;
+      gap: 10px;
+      width: 100%;
+    }
+
+    .flow-row.five {
+      grid-template-columns: 1fr 30px 1fr 30px 1fr 30px 1fr 30px 1fr;
+    }
+
+    .step {
+      position: relative;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      min-height: 142px;
+    }
+
+    .step .num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      margin-bottom: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .connector {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .state-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 18px;
+      width: 100%;
+      margin-top: 28px;
+    }
+
+    .state-box {
+      padding: 24px;
+      min-height: 260px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .state-box::before {
+      content: attr(data-state);
+      display: inline-block;
+      margin-bottom: 18px;
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 800;
+      color: var(--accent);
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .state-box.open { border-top: 5px solid var(--positive); }
+    .state-box.locked { border-top: 5px solid var(--amber); }
+    .state-box.archived { border-top: 5px solid var(--purple); }
+
+    .state-box ul,
+    .compact-list {
+      padding: 0;
+      margin: 16px 0 0;
+      list-style: none;
+      display: grid;
+      gap: 9px;
+    }
+
+    .state-box li,
+    .compact-list li {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.35;
+    }
+
+    .state-box li strong,
+    .compact-list li strong {
+      color: var(--ink);
+    }
+
+    .ledger {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .ledger th,
+    .ledger td {
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+
+    .ledger th {
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      text-transform: uppercase;
+      background: var(--surface-soft);
+    }
+
+    .ledger tr:last-child td { border-bottom: 0; }
+    .ledger .plus { color: var(--positive); font-family: "JetBrains Mono", monospace; font-weight: 800; }
+    .ledger .minus { color: var(--negative); font-family: "JetBrains Mono", monospace; font-weight: 800; }
+    .ledger .neutral { color: var(--accent); font-family: "JetBrains Mono", monospace; font-weight: 800; }
+
+    .handoff-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+      width: 100%;
+    }
+
+    .handoff-card {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+    }
+
+    .path {
+      display: grid;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .path-node {
+      display: grid;
+      grid-template-columns: 130px 1fr;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .role-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    .path-node p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.35;
+      font-size: 16px;
+    }
+
+    .countdown {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 28px;
+      align-items: center;
+      width: 100%;
+      margin-top: 30px;
+    }
+
+    .timer {
+      width: 210px;
+      height: 210px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at center, #fff 58%, transparent 59%),
+        conic-gradient(#d97757 0 78%, var(--border) 78% 100%);
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      box-shadow: 0 16px 30px rgba(217, 119, 87, 0.16);
+    }
+
+    .timer strong {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 46px;
+      color: var(--ink);
+    }
+
+    .formula {
+      display: grid;
+      gap: 14px;
+      padding: 24px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-soft);
+    }
+
+    .formula-line {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 22px;
+      color: var(--ink);
+      line-height: 1.35;
+    }
+
+    .formula-line strong {
+      color: var(--accent);
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 150px 1fr 72px;
+      gap: 14px;
+      align-items: center;
+      margin-top: 13px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .bar-track {
+      height: 16px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .bar-fill.negative { background: var(--negative); }
+    .bar-fill.positive { background: var(--positive); }
+
+    .archive-map {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      width: 100%;
+    }
+
+    .archive-person {
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      min-height: 220px;
+    }
+
+    .archive-person strong {
+      display: block;
+      font-size: 22px;
+      margin-bottom: 14px;
+      color: var(--ink);
+    }
+
+    .takeaways {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      width: 100%;
+      margin-top: 34px;
+    }
+
+    .takeaway {
+      min-height: 190px;
+      padding: 26px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+    }
+
+    .takeaway .num {
+      display: block;
+      color: var(--accent);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 15px;
+      font-weight: 800;
+      margin-bottom: 18px;
+    }
+
+    .takeaway p {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.4;
+    }
+
+    .progress {
+      position: fixed; top: 0; left: 0; height: 3px;
+      background: var(--accent, #0066cc);
+      z-index: 100; transition: width 0.3s ease;
+    }
+
+    .counter {
+      position: fixed; bottom: 20px; right: 30px;
+      font-size: 12px; color: rgba(26,26,46,0.55);
+      font-family: monospace; z-index: 100;
+    }
+
+    .controls {
+      position: fixed;
+      right: 30px;
+      top: 22px;
+      z-index: 110;
+      display: flex;
+      gap: 8px;
+    }
+
+    .controls button {
+      min-width: 42px;
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--ink);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+    }
+
+    .controls button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .controls button[hidden] {
+      display: none;
+    }
+
+    .icon-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .icon-button svg {
+      width: 17px;
+      height: 17px;
+      stroke-width: 2.2;
+    }
+
+    .screenshots-btn {
+      background: rgba(239, 246, 255, 0.96);
+      color: var(--accent);
+      border-color: rgba(37, 99, 235, 0.35);
+    }
+
+    .screenshot-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 240;
+      display: none;
+      padding: 46px 54px;
+      background: rgba(17, 24, 39, 0.72);
+      backdrop-filter: blur(10px);
+    }
+
+    .screenshot-overlay.open {
+      display: grid;
+      place-items: center;
+    }
+
+    .screenshot-panel {
+      width: min(1180px, 94vw);
+      max-height: min(720px, 88vh);
+      border: 1px solid rgba(229, 231, 235, 0.7);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 34px 90px rgba(0, 0, 0, 0.34);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .screenshot-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-soft);
+    }
+
+    .screenshot-title {
+      min-width: 0;
+    }
+
+    .screenshot-title strong {
+      display: block;
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .screenshot-title span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .screenshot-close {
+      width: 38px;
+      height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .screenshot-close:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .screenshot-strip {
+      display: flex;
+      gap: 18px;
+      padding: 22px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scroll-snap-type: x mandatory;
+      scrollbar-color: var(--accent) var(--border);
+      background:
+        linear-gradient(90deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0)) left center / 40px 100% no-repeat,
+        linear-gradient(270deg, rgba(255, 255, 255, 1), rgba(255, 255, 255, 0)) right center / 40px 100% no-repeat,
+        #fff;
+    }
+
+    .screenshot-card {
+      flex: 0 0 min(980px, 82vw);
+      scroll-snap-align: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-soft);
+      overflow: hidden;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+    }
+
+    .screenshot-card img {
+      display: block;
+      width: 100%;
+      max-height: min(560px, 66vh);
+      object-fit: contain;
+      background: #f4f2f0;
+    }
+
+    .screenshot-caption {
+      padding: 13px 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.35;
+      font-weight: 650;
+    }
+
+    .hint {
+      position: fixed;
+      left: 30px;
+      bottom: 20px;
+      z-index: 100;
+      color: rgba(26, 26, 46, 0.48);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    @media (max-width: 900px) {
+      .slide { padding: 34px 38px; }
+      h1 { font-size: 42px; }
+      h2 { font-size: 32px; }
+      .lead { font-size: 18px; }
+      .grid-4,
+      .grid-3,
+      .grid-2,
+      .comparison,
+      .handoff-grid,
+      .archive-map,
+      .takeaways,
+      .state-strip {
+        gap: 10px;
+      }
+      .card,
+      .stat-card,
+      .state-box,
+      .takeaway,
+      .handoff-card { padding: 14px; }
+    }
+
+    @media print {
+      .progress, .counter, .controls, .screenshot-overlay, nav, button,
+      [class*="hint"], [class*="btn"] { display: none !important; }
+
+      .slide {
+        page-break-after: always;
+        position: relative !important;
+        opacity: 1 !important;
+        display: flex !important;
+        width: 100vw; height: 100vh;
+      }
+
+      @page { size: landscape; margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck" aria-live="polite">
+    <div class="progress" id="progress"></div>
+    <div class="counter" id="counter"></div>
+    <div class="controls" aria-label="Presentation controls">
+      <button id="prevBtn" type="button" title="Previous slide">Prev</button>
+      <button id="nextBtn" type="button" title="Next slide">Next</button>
+      <button id="screenshotsBtn" class="icon-button screenshots-btn" type="button" title="Show demo screenshots" aria-label="Show demo screenshots" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M14.5 4h-5L8 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3l-1.5-2Z"></path>
+          <circle cx="12" cy="13" r="3.5"></circle>
+        </svg>
+      </button>
+      <button id="fullBtn" type="button" title="Toggle fullscreen">Full</button>
+      <button id="notesBtn" type="button" title="Toggle speaker notes">Notes</button>
+    </div>
+    <div class="hint">Space / Arrow keys to navigate - F fullscreen - S speaker notes</div>
+
+    <div id="screenshotOverlay" class="screenshot-overlay" role="dialog" aria-modal="true" aria-labelledby="screenshotTitle" aria-hidden="true" tabindex="-1">
+      <div class="screenshot-panel">
+        <div class="screenshot-header">
+          <div class="screenshot-title">
+            <strong id="screenshotTitle">Demo screenshots</strong>
+            <span id="screenshotCount">0 screenshots</span>
+          </div>
+          <button id="screenshotCloseBtn" class="screenshot-close" type="button" aria-label="Close screenshots">&times;</button>
+        </div>
+        <div id="screenshotStrip" class="screenshot-strip" aria-label="Relevant screenshots for this slide"></div>
+      </div>
+    </div>
+
+    <section class="slide active" data-notes="Good afternoon. We are team DT2.N15. Today we are presenting Book Exchange Club, a prototype for helping club members exchange and lend books with clear roles, real-life handoff confirmation, and transparent point updates. The important idea is that this is not just a catalog. The center of the system is the transaction.">
+      <div class="overline a">HTTT Hackathon Final Presentation</div>
+      <h1 class="a">Book Exchange Club</h1>
+      <p class="lead a">A transaction-first prototype for exchanging, lending, and delivering books inside a club.</p>
+      <div class="team-grid a">
+        <div class="member-card">
+          <span class="mono">21020058</span>
+          <strong>Trương Tuấn Dũng</strong>
+        </div>
+        <div class="member-card">
+          <span class="mono">23020146</span>
+          <strong>Đặng Anh Tôn</strong>
+        </div>
+      </div>
+      <div class="team-name a">Team: ĐT2.N15</div>
+    </section>
+
+    <section class="slide" data-notes="The objective is to make book exchange easier without losing control over fairness. The scope includes member accounts, book listings, two exchange modes, optional courier delivery, chatbox coordination, confirmation, point updates, and archives. We intentionally focus the presentation on the mechanisms that make the prototype reliable.">
+      <div class="overline a">Objective and Scope</div>
+      <h2 class="a">Turn informal book exchange into a controlled transaction workflow.</h2>
+      <p class="lead a">The app connects members, but the real value is enforcing the rules around who participates, when points move, and what remains visible afterwards.</p>
+      <div class="grid-4 content a">
+        <div class="stat-card">
+          <strong>20</strong>
+          <span>starting points per member</span>
+          <div class="trend neutral">account baseline</div>
+        </div>
+        <div class="stat-card">
+          <strong>2</strong>
+          <span>exchange modes: permanent or loan</span>
+          <div class="trend neutral">business scope</div>
+        </div>
+        <div class="stat-card">
+          <strong>3</strong>
+          <span>possible roles in one transaction</span>
+          <div class="trend neutral">owner, requester, courier</div>
+        </div>
+        <div class="stat-card">
+          <strong>1</strong>
+          <span>archive record after completion</span>
+          <div class="trend positive">transparent outcome</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="A simple listing page can show available books, but it cannot answer the hard questions. Who is allowed to receive the book? Did the handoff really happen? Should the requester be allowed to commit more points? Our solution treats those questions as first-class system behavior.">
+      <div class="overline a">The Core Problem</div>
+      <h2 class="a">Discovery is easy. Trust is the real workflow.</h2>
+      <div class="comparison content a">
+        <div class="compare-col problem">
+          <span class="label">If it is only a catalog</span>
+          <h3>Important decisions stay outside the system</h3>
+          <ul class="bullet-list">
+            <li>Role agreement happens through informal messages.</li>
+            <li>Delivery status is ambiguous after people meet.</li>
+            <li>Point spending can exceed what a member can afford.</li>
+            <li>No shared record explains why points changed.</li>
+          </ul>
+        </div>
+        <div class="compare-col solution">
+          <span class="label">Our prototype</span>
+          <h3>The transaction becomes the source of truth</h3>
+          <ul class="bullet-list">
+            <li>Applications and approvals attach roles to the transaction.</li>
+            <li>Physical handoff is confirmed by the correct two people.</li>
+            <li>Budget is reserved before a requester can overcommit.</li>
+            <li>Archive preserves the final roles, status, and point deltas.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="The implementation is intentionally compact for the hackathon. The backend is a single FastAPI file using SQLModel and SQLite. The frontend is Svelte, with screens for books, book details, chatbox, notifications, profile, and archive. The documentation folder contains the analysis and design report.">
+      <div class="overline a">Prototype Structure</div>
+      <h2 class="a">Small codebase, complete business loop.</h2>
+      <div class="grid-3 content a">
+        <div class="card">
+          <span class="tag">Backend</span>
+          <h3>FastAPI in one file</h3>
+          <p><span class="mono">backend/main.py</span> defines models, API routes, point rules, confirmation logic, and SQLite persistence.</p>
+        </div>
+        <div class="card">
+          <span class="tag">Frontend</span>
+          <h3>Svelte app</h3>
+          <p>Book browsing, listing forms, chatbox tabs, role application UI, confirmation buttons, and archive cards.</p>
+        </div>
+        <div class="card">
+          <span class="tag">Docs</span>
+          <h3>Technical report</h3>
+          <p>Requirements, architecture, DFD, ERD, API design, UI/UX notes, testing, and deployment assumptions.</p>
+        </div>
+      </div>
+      <div class="content a">
+        <table class="ledger">
+          <thead>
+            <tr><th>Layer</th><th>Key responsibility</th><th>Why it matters in the demo</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="mono">SQLModel</td><td>Member, Book, Transaction, Message, ActivityTracking</td><td>Business state is explicit and queryable.</td></tr>
+            <tr><td class="mono">Svelte</td><td>Role-aware interaction screens</td><td>Each participant sees the right actions.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="This slide defines the central object. A transaction binds one book to its participants and status flags. It knows the owner, optional requester, optional courier, confirmation bits, lock state, point application state, and archive state. That is why the rest of the app can stay consistent.">
+      <div class="overline a">Core Model</div>
+      <h2 class="a">A transaction is the unit of trust.</h2>
+      <div class="grid-4 content a">
+        <div class="stat-card">
+          <strong>Book</strong>
+          <span>one listing creates or reuses one active chatbox transaction</span>
+        </div>
+        <div class="stat-card">
+          <strong>Roles</strong>
+          <span>owner required, requester required to complete, courier optional</span>
+        </div>
+        <div class="stat-card">
+          <strong>Flags</strong>
+          <span>confirmed, locked, points_applied, archived</span>
+        </div>
+        <div class="stat-card">
+          <strong>Ledger</strong>
+          <span>point deltas are derived from exchange mode and courier presence</span>
+        </div>
+      </div>
+      <div class="content a">
+        <table class="ledger">
+          <thead>
+            <tr><th>Field group</th><th>Examples</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Participants</td><td class="mono">owner_id, requester_id, courier_id</td><td>Defines who can act and who can approve.</td></tr>
+            <tr><td>Confirmation</td><td class="mono">owner_confirmed, requester_confirmed</td><td>Tracks physical handoff progress.</td></tr>
+            <tr><td>State</td><td class="mono">locked, points_applied, archived</td><td>Prevents duplicate updates and preserves history.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Role application starts from a simple principle: participants should not appear in a transaction unless the owner explicitly accepts them. A member applies as requester or courier, writes an intro message, the owner approves, and the transaction records the accepted role. The system blocks invalid cases, such as the owner applying to their own book or the same person being both requester and courier.">
+      <div class="overline a">Mechanism 1 - Role Application</div>
+      <h2 class="a">A role is not claimed. It is requested, reviewed, and accepted.</h2>
+      <div class="flow-row five content a">
+        <div class="step">
+          <span class="num">01</span>
+          <h3>Find book</h3>
+          <p>Member opens an available listing and enters the transaction context.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">02</span>
+          <h3>Choose role</h3>
+          <p>Applicant chooses requester or courier and sends an intro message.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">03</span>
+          <h3>Notify owner</h3>
+          <p>The application is stored as a join request notification.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">04</span>
+          <h3>Owner decides</h3>
+          <p>The owner approves one requester and optionally one courier.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">05</span>
+          <h3>Role attaches</h3>
+          <p>The transaction now has accepted participants and role-aware chat.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="The open state is where negotiation happens. Applications can still change, participants can leave, the owner can replace a participant, and chat continues. But even in open state, the system already enforces important boundaries: requester budget, unique roles, no owner self-application, and role-based visibility.">
+      <div class="overline a">Transaction State - Open</div>
+      <h2 class="a">Open means negotiable, not uncontrolled.</h2>
+      <div class="state-strip a">
+        <div class="state-box open" data-state="Allowed">
+          <h3>Role formation</h3>
+          <ul>
+            <li><strong>Apply</strong> as requester or courier.</li>
+            <li><strong>Withdraw</strong> a pending application.</li>
+            <li><strong>Accept</strong> or replace a participant.</li>
+            <li><strong>Leave or remove</strong> accepted requester/courier.</li>
+          </ul>
+        </div>
+        <div class="state-box open" data-state="Coordination">
+          <h3>Chatbox workflow</h3>
+          <ul>
+            <li>Participants discuss timing and delivery method.</li>
+            <li>Owner can choose direct handoff or courier route.</li>
+            <li>Unread counts keep chat and notifications visible.</li>
+          </ul>
+        </div>
+        <div class="state-box open" data-state="Guards">
+          <h3>Business constraints</h3>
+          <ul>
+            <li>Owner cannot apply to their own transaction.</li>
+            <li>Requester and courier must be different members.</li>
+            <li>Requester must have enough available points.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Locked state begins when a real handoff starts. In a direct exchange, it immediately proceeds to completion. With a courier, the owner-to-courier handoff locks the transaction while the book is in transit. Locking deletes pending role applications and prevents membership changes, so the delivery cannot be changed halfway through.">
+      <div class="overline a">Transaction State - Locked</div>
+      <h2 class="a">Locked means the book is moving in the real world.</h2>
+      <div class="flow-row content a">
+        <div class="step">
+          <span class="num">01</span>
+          <h3>First handoff confirmed</h3>
+          <p>Owner meets requester directly, or owner meets courier for pickup.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">02</span>
+          <h3>Transaction locks</h3>
+          <p>Pending join requests are deleted and accepted roles stop changing.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">03</span>
+          <h3>Delivery continues</h3>
+          <p>For courier route, the system waits for courier-requester delivery confirmation.</p>
+        </div>
+        <div class="connector">-&gt;</div>
+        <div class="step">
+          <span class="num">04</span>
+          <h3>No point movement yet</h3>
+          <p>Points apply only after both required confirmation flags are true.</p>
+        </div>
+      </div>
+      <p class="lead a">The lock protects the handoff from late applicants, role swaps, and duplicate completion attempts.</p>
+    </section>
+
+    <section class="slide" data-notes="Archived state is the end of the business transaction. The system applies points exactly once, marks the transaction archived, locks it, and marks the book unavailable. This is also where the archive becomes useful: it explains the final result to all roles.">
+      <div class="overline a">Transaction State - Archived</div>
+      <h2 class="a">Archived means completed, immutable, and explainable.</h2>
+      <div class="grid-3 content a">
+        <div class="stat-card">
+          <strong>once</strong>
+          <span>points_applied prevents duplicate point movement</span>
+          <div class="trend positive">idempotent outcome</div>
+        </div>
+        <div class="stat-card">
+          <strong>false</strong>
+          <span>book.available after successful completion</span>
+          <div class="trend neutral">no accidental re-request</div>
+        </div>
+        <div class="stat-card">
+          <strong>read-only</strong>
+          <span>archived chatbox becomes a transparency record</span>
+          <div class="trend neutral">shared history</div>
+        </div>
+      </div>
+      <div class="content a">
+        <table class="ledger">
+          <thead>
+            <tr><th>Role</th><th>Permanent</th><th>Loan</th><th>Courier route</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Owner</td><td class="plus">+10 pts</td><td class="plus">+5 pts</td><td>same owner reward</td></tr>
+            <tr><td>Requester</td><td class="minus">-10 pts</td><td class="minus">-5 pts</td><td>same requester cost</td></tr>
+            <tr><td>Courier</td><td class="neutral">optional</td><td class="neutral">optional</td><td class="plus">+2 pts</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="There are two delivery paths. Direct handoff means owner and requester confirm each other, then the transaction completes. Courier route has two confirmations: owner with courier first, then courier with requester. The backend validates that the two users in a confirmation are exactly the expected participants.">
+      <div class="overline a">IRL Confirmation</div>
+      <h2 class="a">A handoff is accepted only by the two people who physically meet.</h2>
+      <div class="handoff-grid content a">
+        <div class="handoff-card">
+          <span class="label">Direct handoff</span>
+          <h3>Owner to requester</h3>
+          <div class="path">
+            <div class="path-node">
+              <span class="role-pill">Owner</span>
+              <p>Creates or approves a direct handoff confirmation.</p>
+            </div>
+            <div class="path-node">
+              <span class="role-pill">Requester</span>
+              <p>Approves while present. Owner and requester confirmation become true.</p>
+            </div>
+            <div class="path-node">
+              <span class="role-pill">Archive</span>
+              <p>Points apply and the book becomes unavailable.</p>
+            </div>
+          </div>
+        </div>
+        <div class="handoff-card">
+          <span class="label">Courier handoff</span>
+          <h3>Owner to courier to requester</h3>
+          <div class="path">
+            <div class="path-node">
+              <span class="role-pill">Owner + Courier</span>
+              <p>Pickup confirmation sets owner_confirmed and locks the transaction.</p>
+            </div>
+            <div class="path-node">
+              <span class="role-pill">Courier + Requester</span>
+              <p>Delivery confirmation sets requester_confirmed.</p>
+            </div>
+            <div class="path-node">
+              <span class="role-pill">Archive</span>
+              <p>Owner/requester points apply, courier receives the delivery reward.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="The 60-second timeout is not arbitrary. It is designed for real-life meetups. If I hand you the book now, you should approve now. If the confirmation sits open too long, the backend clears the approver fields and the request can no longer be approved. That forces people to create a fresh confirmation when they are actually together.">
+      <div class="overline a">60-Second Confirmation Window</div>
+      <h2 class="a">The timeout turns phone approval into proof of presence.</h2>
+      <div class="countdown a">
+        <div class="timer"><strong>60s</strong></div>
+        <div class="formula">
+          <div class="formula-line"><strong>Request</strong> created by one accepted participant</div>
+          <div class="formula-line"><strong>Approver</strong> must be the expected counterparty</div>
+          <div class="formula-line"><strong>Expires</strong> if not approved inside the meetup window</div>
+          <div class="formula-line"><strong>Retry</strong> requires a fresh confirmation request</div>
+        </div>
+      </div>
+      <p class="lead a">This discourages delayed remote approvals and makes confirmation match the real-world handoff moment.</p>
+    </section>
+
+    <section class="slide" data-notes="The point economy is simple enough for members to understand. New users start with 20 points. Permanent exchange moves 10 points from requester to owner. Loan moves 5. Courier gets 2 only after successful delivery. The simplicity matters because the next mechanism, budget anticipation, depends on predictable costs.">
+      <div class="overline a">Point Economy</div>
+      <h2 class="a">The point rules are simple, predictable, and delayed until success.</h2>
+      <div class="grid-4 content a">
+        <div class="stat-card">
+          <strong>20</strong>
+          <span>starting balance for every registered member</span>
+          <div class="trend neutral">initial trust budget</div>
+        </div>
+        <div class="stat-card">
+          <strong>10</strong>
+          <span>permanent exchange cost and owner reward</span>
+          <div class="trend positive">full transfer</div>
+        </div>
+        <div class="stat-card">
+          <strong>5</strong>
+          <span>loan cost and owner reward</span>
+          <div class="trend positive">temporary access</div>
+        </div>
+        <div class="stat-card">
+          <strong>2</strong>
+          <span>courier reward after successful delivery</span>
+          <div class="trend positive">delivery incentive</div>
+        </div>
+      </div>
+      <div class="content a">
+        <table class="ledger">
+          <thead>
+            <tr><th>When points move</th><th>Condition</th><th>System effect</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Never at application time</td><td>Only intent exists</td><td>Budget reservation only</td></tr>
+            <tr><td>Only after confirmations</td><td>Both confirmation flags are true</td><td>Owner/requester/courier deltas apply</td></tr>
+            <tr><td>Only once</td><td class="mono">points_applied == false</td><td>Duplicate completion is blocked</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="This is the second major mechanism. The system does not wait until completion to discover that a requester has overspent. It calculates exposure from active accepted requester transactions and pending requester applications. Available points are current points minus reserved exposure. If the next request needs more than the available amount, the application is blocked.">
+      <div class="overline a">Mechanism 2 - Budget Anticipation</div>
+      <h2 class="a">Available points prevent worst-case overspending before it happens.</h2>
+      <div class="grid-2 content a">
+        <div class="formula">
+          <div class="formula-line"><strong>available</strong> = current points - reserved exposure</div>
+          <div class="formula-line"><strong>reserved</strong> = accepted requester commitments + pending requester applications</div>
+          <div class="formula-line"><strong>can request</strong> = available >= required cost</div>
+        </div>
+        <div class="panel" style="padding: 24px;">
+          <span class="label">Example member</span>
+          <div class="bar-row">
+            <span>Current points</span>
+            <div class="bar-track"><div class="bar-fill positive" style="width:100%;"></div></div>
+            <span class="mono">20</span>
+          </div>
+          <div class="bar-row">
+            <span>Reserved</span>
+            <div class="bar-track"><div class="bar-fill negative" style="width:75%;"></div></div>
+            <span class="mono">15</span>
+          </div>
+          <div class="bar-row">
+            <span>Available</span>
+            <div class="bar-track"><div class="bar-fill" style="width:25%;"></div></div>
+            <span class="mono">5</span>
+          </div>
+          <ul class="compact-list">
+            <li><strong>Permanent request needs 10:</strong> blocked.</li>
+            <li><strong>Loan request needs 5:</strong> allowed.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="lead a">The design protects the system from the worst case where every pending request is accepted.</p>
+    </section>
+
+    <section class="slide" data-notes="The archive is the transparency layer. It is not just old data. For owner, requester, and courier, it answers the same questions: who participated, what book was involved, which route was used, what confirmations happened, and why each person's points changed. This reduces disputes after a transaction is complete.">
+      <div class="overline a">Mechanism 3 - Archive</div>
+      <h2 class="a">Archive turns completion into a shared receipt.</h2>
+      <div class="archive-map content a">
+        <div class="archive-person">
+          <strong>Owner view</strong>
+          <ul class="compact-list">
+            <li>Which requester received or borrowed the book.</li>
+            <li>Whether delivery was direct or through a courier.</li>
+            <li>Why the owner earned +10 or +5 points.</li>
+          </ul>
+        </div>
+        <div class="archive-person">
+          <strong>Requester view</strong>
+          <ul class="compact-list">
+            <li>Which book was completed and no longer open.</li>
+            <li>Which handoff path was confirmed.</li>
+            <li>Why the requester spent -10 or -5 points.</li>
+          </ul>
+        </div>
+        <div class="archive-person">
+          <strong>Courier view</strong>
+          <ul class="compact-list">
+            <li>Which delivery they completed.</li>
+            <li>Pickup and delivery confirmations are preserved.</li>
+            <li>Why the courier earned +2 points.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="lead a">After archive, the chatbox is no longer a negotiation space. It becomes evidence.</p>
+    </section>
+
+    <section class="slide" data-notes="To close, the prototype is valuable because it models the hard part of exchange: trust. The transaction state machine controls when roles can change. Physical confirmation controls when the handoff counts. Budget anticipation controls what users can commit to. Archive makes the outcome explainable. In the demo, watch the path from application to confirmation to archive.">
+      <div class="overline a">Closing</div>
+      <h2 class="a">What we built: a trust layer for book exchange.</h2>
+      <p class="lead a">The prototype is small, but the business logic is complete enough to show how a club can exchange books without losing fairness or traceability.</p>
+      <div class="takeaways a">
+        <div class="takeaway">
+          <span class="num">01</span>
+          <h3>Transaction state machine</h3>
+          <p>Open, locked, and archived states keep real-world delivery aligned with system state.</p>
+        </div>
+        <div class="takeaway">
+          <span class="num">02</span>
+          <h3>Budget guard</h3>
+          <p>Available points reserve the worst case, so users cannot overcommit before completion.</p>
+        </div>
+        <div class="takeaway">
+          <span class="num">03</span>
+          <h3>Transparent archive</h3>
+          <p>Every role can see the final participants, delivery path, and point outcome.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // Slide navigation
+    const slides = [...document.querySelectorAll('.slide')];
+    const screenshotButton = document.getElementById('screenshotsBtn');
+    const screenshotOverlay = document.getElementById('screenshotOverlay');
+    const screenshotStrip = document.getElementById('screenshotStrip');
+    const screenshotTitle = document.getElementById('screenshotTitle');
+    const screenshotCount = document.getElementById('screenshotCount');
+    const screenshotCloseBtn = document.getElementById('screenshotCloseBtn');
+    let current = 0;
+
+    const screenshotSets = {
+      1: [
+        {
+          src: 'screenshots/log_in.png',
+          alt: 'Login and registration screen for Book Exchange Club',
+          caption: 'Entry point for members before they manage books, points, messages, and profiles.'
+        },
+        {
+          src: 'screenshots/default_20_pts.png',
+          alt: 'Member dashboard showing 20 starting points and 20 available points',
+          caption: 'New member point baseline: 20 current points and 20 available points.'
+        },
+        {
+          src: 'screenshots/available.png',
+          alt: 'Available books section with several open book listings',
+          caption: 'Book discovery scope: members browse available permanent exchanges and loans.'
+        }
+      ],
+      3: [
+        {
+          src: 'screenshots/main_py_1file.png',
+          alt: 'Backend main.py file open in the editor',
+          caption: 'Backend implementation is concentrated in one FastAPI file: models, routes, and business rules.'
+        },
+        {
+          src: 'screenshots/sqlite.png',
+          alt: 'SQLite web view showing the book table schema',
+          caption: 'SQLite stores the local prototype data model for books, members, messages, and transactions.'
+        }
+      ],
+      4: [
+        {
+          src: 'screenshots/transaction_schema.png',
+          alt: 'SQLite transaction table schema with role and state fields',
+          caption: 'Transaction schema exposes role fields and state flags: requester, courier, confirmations, lock, points, archive.'
+        },
+        {
+          src: 'screenshots/sqlite.png',
+          alt: 'SQLite web view showing the book table schema',
+          caption: 'Book schema connects listings to transaction creation and availability state.'
+        }
+      ],
+      5: [
+        {
+          src: 'screenshots/apply_requester.png',
+          alt: 'Book detail page with requester role selected and apply button',
+          caption: 'Requester application: role selection, available points, required points, and intro note are visible before applying.'
+        },
+        {
+          src: 'screenshots/apply_courier.png',
+          alt: 'Book detail page with courier role selected and apply button',
+          caption: 'Courier application uses the same transaction entry point but a different role.'
+        },
+        {
+          src: 'screenshots/notification_view.png',
+          alt: 'Messages dropdown showing a direct handoff confirmation request',
+          caption: 'Applications and confirmations are delivered through the notification/message surface.'
+        }
+      ],
+      6: [
+        {
+          src: 'screenshots/available.png',
+          alt: 'Available books section with open listings',
+          caption: 'Open transaction discovery: available listings remain requestable before a handoff begins.'
+        },
+        {
+          src: 'screenshots/apply_requester.png',
+          alt: 'Requester application UI with status open',
+          caption: 'Open state allows requester applications while still enforcing available point checks.'
+        },
+        {
+          src: 'screenshots/apply_courier.png',
+          alt: 'Courier application UI with status open',
+          caption: 'Open state also allows a courier application before the transaction locks.'
+        }
+      ],
+      7: [
+        {
+          src: 'screenshots/locked.png',
+          alt: 'Locked transaction chatbox with owner-courier handoff approved',
+          caption: 'Locked state after owner-courier handoff: roles are fixed while delivery continues.'
+        },
+        {
+          src: 'screenshots/notification_view.png',
+          alt: 'Notification list with handoff confirmation request',
+          caption: 'Confirmation request is the transition point from open negotiation toward locked delivery.'
+        }
+      ],
+      8: [
+        {
+          src: 'screenshots/archive.png',
+          alt: 'Archive section showing completed exchanges and point delta',
+          caption: 'Archived book cards summarize completed transactions and visible point changes.'
+        },
+        {
+          src: 'screenshots/archive_chatbox.png',
+          alt: 'Archived read-only chatbox with final point changes',
+          caption: 'Archived chatbox preserves final roles and point deltas as a read-only record.'
+        }
+      ],
+      9: [
+        {
+          src: 'screenshots/notification_view.png',
+          alt: 'Notification list showing handoff confirmation request',
+          caption: 'One participant requests confirmation and the expected counterparty approves.'
+        },
+        {
+          src: 'screenshots/locked.png',
+          alt: 'Locked transaction showing owner-courier handoff approval',
+          caption: 'Owner-courier pickup creates the locked in-transit state.'
+        },
+        {
+          src: 'screenshots/counting_down.png',
+          alt: 'Direct handoff confirmation with countdown and approve button',
+          caption: 'Direct handoff shows the active approval window during the real-life meetup.'
+        }
+      ],
+      10: [
+        {
+          src: 'screenshots/counting_down.png',
+          alt: 'Direct handoff confirmation request with a 48 second countdown',
+          caption: 'The countdown makes approval time-bound so confirmation happens while participants are together.'
+        },
+        {
+          src: 'screenshots/notification_view.png',
+          alt: 'Messages dropdown with confirmation request',
+          caption: 'After timeout, the system requires a fresh confirmation instead of accepting stale approval.'
+        }
+      ],
+      11: [
+        {
+          src: 'screenshots/default_20_pts.png',
+          alt: 'User dashboard showing 20 points and 20 available points',
+          caption: 'Point economy starts with a 20-point balance and an available-point view.'
+        },
+        {
+          src: 'screenshots/archive_chatbox.png',
+          alt: 'Archived chatbox showing owner and requester point deltas',
+          caption: 'Point movement appears only after completion and is visible in the archive.'
+        }
+      ],
+      12: [
+        {
+          src: 'screenshots/apply_requester.png',
+          alt: 'Requester application screen showing available points and needed points',
+          caption: 'Requester budget check is shown at application time: available points versus required points.'
+        },
+        {
+          src: 'screenshots/default_20_pts.png',
+          alt: 'Member header showing available points',
+          caption: 'The header keeps current and available points visible before users commit to requests.'
+        }
+      ],
+      13: [
+        {
+          src: 'screenshots/archive.png',
+          alt: 'Archive section listing completed exchanges',
+          caption: 'Archive list gives every participant a visible completed-transaction record.'
+        },
+        {
+          src: 'screenshots/archive_chatbox.png',
+          alt: 'Archived read-only chatbox with owner and requester point summary',
+          caption: 'Archive detail is the transparency layer: final roles, messages, and point deltas stay inspectable.'
+        }
+      ]
+    };
+
+    function goTo(index) {
+      if (index < 0 || index >= slides.length) return;
+      slides[current].classList.remove('active');
+      slides[index].classList.add('active');
+      current = index;
+      updateProgress();
+      updateCounter();
+      updateNotes();
+      updateScreenshotButton();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (isScreenshotOverlayOpen()) {
+        if (e.key === 'Escape') { e.preventDefault(); closeScreenshotCarousel(); return; }
+        if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); scrollScreenshotCarousel(1); return; }
+        if (e.key === 'ArrowLeft') { e.preventDefault(); scrollScreenshotCarousel(-1); return; }
+      }
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(current - 1); }
+      if (e.key.toLowerCase() === 'f') toggleFullscreen();
+      if (e.key.toLowerCase() === 's') toggleNotes();
+    });
+
+    // Touch/swipe
+    let touchStartX = 0;
+    document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
+    document.addEventListener('touchend', (e) => {
+      const diff = touchStartX - e.changedTouches[0].clientX;
+      if (Math.abs(diff) > 50) diff > 0 ? goTo(current + 1) : goTo(current - 1);
+    });
+
+    function updateProgress() {
+      document.getElementById('progress').style.width =
+        (current / (slides.length - 1) * 100) + '%';
+    }
+
+    function updateCounter() {
+      document.getElementById('counter').textContent =
+        (current + 1) + ' / ' + slides.length;
+    }
+
+    function activeScreenshots() {
+      return screenshotSets[current] || [];
+    }
+
+    function activeSlideTitle() {
+      const heading = slides[current].querySelector('h1, h2');
+      return heading ? heading.textContent.trim() : 'Current slide';
+    }
+
+    function updateScreenshotButton() {
+      const screenshots = activeScreenshots();
+      if (!screenshots.length) {
+        screenshotButton.hidden = true;
+        if (isScreenshotOverlayOpen()) closeScreenshotCarousel();
+        return;
+      }
+      const label = `Show ${screenshots.length} demo screenshot${screenshots.length === 1 ? '' : 's'} for slide ${current + 1}`;
+      screenshotButton.hidden = false;
+      screenshotButton.title = label;
+      screenshotButton.setAttribute('aria-label', label);
+      if (isScreenshotOverlayOpen()) renderScreenshotCarousel();
+    }
+
+    function renderScreenshotCarousel() {
+      const screenshots = activeScreenshots();
+      screenshotTitle.textContent = activeSlideTitle();
+      screenshotCount.textContent = `${screenshots.length} relevant screenshot${screenshots.length === 1 ? '' : 's'} - scroll horizontally`;
+      screenshotStrip.innerHTML = screenshots.map((item) => `
+        <figure class="screenshot-card">
+          <img src="${item.src}" alt="${item.alt}" loading="lazy">
+          <figcaption class="screenshot-caption">${item.caption}</figcaption>
+        </figure>
+      `).join('');
+      screenshotStrip.scrollLeft = 0;
+    }
+
+    function openScreenshotCarousel() {
+      if (!activeScreenshots().length) return;
+      renderScreenshotCarousel();
+      screenshotOverlay.classList.add('open');
+      screenshotOverlay.setAttribute('aria-hidden', 'false');
+      screenshotOverlay.focus();
+    }
+
+    function closeScreenshotCarousel() {
+      screenshotOverlay.classList.remove('open');
+      screenshotOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    function isScreenshotOverlayOpen() {
+      return screenshotOverlay.classList.contains('open');
+    }
+
+    function scrollScreenshotCarousel(direction) {
+      screenshotStrip.scrollBy({
+        left: direction * Math.max(360, screenshotStrip.clientWidth * 0.82),
+        behavior: 'smooth'
+      });
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    let notesWindow = null;
+
+    function toggleNotes() {
+      if (notesWindow && !notesWindow.closed) {
+        notesWindow.close();
+        notesWindow = null;
+        return;
+      }
+      notesWindow = window.open('', 'SpeakerNotes', 'width=520,height=420,top=80,left=80');
+      notesWindow.document.write(`<!DOCTYPE html>
+<html><head><style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+         background: #1a1a1a; color: #e0e0e0; padding: 24px; }
+  .slide-num { font-size: 12px; color: #888; margin-bottom: 12px; font-family: monospace; }
+  .label { font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
+           color: #666; margin-bottom: 8px; }
+  .notes { font-size: 16px; line-height: 1.8; color: #ccc; }
+</style></head><body>
+  <div class="slide-num" id="sn"></div>
+  <div class="label">Speaker Notes</div>
+  <div class="notes" id="nt"></div>
+</body></html>`);
+      notesWindow.document.close();
+      updateNotes();
+    }
+
+    function updateNotes() {
+      if (!notesWindow || notesWindow.closed) return;
+      try {
+        const note = slides[current].dataset.notes || '(No notes)';
+        notesWindow.document.getElementById('nt').textContent = note;
+        notesWindow.document.getElementById('sn').textContent =
+          'Slide ' + (current + 1) + ' / ' + slides.length;
+      } catch(e) {}
+    }
+
+    document.getElementById('prevBtn').addEventListener('click', () => goTo(current - 1));
+    document.getElementById('nextBtn').addEventListener('click', () => goTo(current + 1));
+    screenshotButton.addEventListener('click', openScreenshotCarousel);
+    screenshotCloseBtn.addEventListener('click', closeScreenshotCarousel);
+    screenshotOverlay.addEventListener('click', (event) => {
+      if (event.target === screenshotOverlay) closeScreenshotCarousel();
+    });
+    document.getElementById('fullBtn').addEventListener('click', toggleFullscreen);
+    document.getElementById('notesBtn').addEventListener('click', toggleNotes);
+
+    updateProgress();
+    updateCounter();
+    updateScreenshotButton();
+  </script>
+</body>
+</html>

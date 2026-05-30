@@ -4,6 +4,7 @@
 	import { Pencil, Plus, RotateCcw, X } from '@lucide/svelte';
 	import ListingSection from '$lib/components/ListingSection.svelte';
 	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
+	import { formatPointDelta, pointDeltaForMember } from '$lib/points';
 	import {
 		apiFetch,
 		clearSession,
@@ -51,13 +52,15 @@
 	);
 	let archivedTransactions = $derived(
 		member
-			? transactions.filter(
-					(transaction) =>
-						transaction.archived &&
-						(transaction.owner_id === member?.id ||
-							transaction.requester_id === member?.id ||
-							transaction.courier_id === member?.id)
-				)
+			? transactions
+					.filter(
+						(transaction) =>
+							transaction.archived &&
+							(transaction.owner_id === member?.id ||
+								transaction.requester_id === member?.id ||
+								transaction.courier_id === member?.id)
+					)
+					.sort((first, second) => second.id - first.id)
 			: []
 	);
 	let acceptedBookIds = $derived(new Set(acceptedTransactions.map((transaction) => transaction.book_id)));
@@ -351,6 +354,7 @@
 {/snippet}
 
 {#snippet archivedBookCard(row: { transaction: Transaction; book: Book })}
+	{@const memberPointDelta = pointDeltaForMember(row.transaction, member?.id)}
 	<div class="book-card accepted">
 		<button class="card-hitbox" type="button" onclick={() => openArchivedBook(row.book, row.transaction)}>
 			{#if row.book.picture_path}
@@ -362,6 +366,15 @@
 			<span class="tag-row">
 				<span class="pill">{exchangeModeLabel(row.book.exchange_mode)}</span>
 				<span class="pill">Archived</span>
+				{#if memberPointDelta !== null}
+					<span
+						class:negative={memberPointDelta < 0}
+						class:positive={memberPointDelta > 0}
+						class="pill point-pill"
+					>
+						{formatPointDelta(memberPointDelta)}
+					</span>
+				{/if}
 			</span>
 		</button>
 		{#if canRenewArchivedLoan(row)}

@@ -1,0 +1,49 @@
+%%{init: {"theme": "base", "themeVariables": {"primaryColor": "#eff6ff", "primaryBorderColor": "#1d4ed8", "lineColor": "#0f172a", "fontFamily": "Arial"}, "flowchart": {"curve": "basis", "nodeSpacing": 44, "rankSpacing": 60}}}%%
+flowchart LR
+    Owner[Owner - chu so huu sach]
+    Requester[Requester - nguoi nhan/muon sach]
+    Courier[Courier - nguoi giao sach mien phi]
+
+    subgraph System[Book Exchange Club]
+        direction TB
+        UC1((Tai khoan va ho so))
+        UC2((Tim kiem va loc sach))
+        UC3((Dang / sua / xoa sach))
+        UC4((Chap nhan requester / courier))
+        UC5((Xoa nguoi tham gia))
+        UC6((Renew sach cho muon))
+        UC7((Ung tuyen nhan / muon sach))
+        UC8((Rut don ung tuyen))
+        UC9((Chat va thong bao))
+        UC10((Xac nhan giao nhan))
+        UC11((Ung tuyen giao sach))
+        UC12((Nhan va giao sach))
+    end
+
+    Owner --> UC1
+    Owner --> UC2
+    Owner --> UC3
+    Owner --> UC4
+    Owner --> UC5
+    Owner --> UC6
+    Owner --> UC9
+    Owner --> UC10
+
+    Requester --> UC1
+    Requester --> UC2
+    Requester --> UC7
+    Requester --> UC8
+    Requester --> UC9
+    Requester --> UC10
+
+    Courier --> UC1
+    Courier --> UC9
+    Courier --> UC10
+    Courier --> UC11
+    Courier --> UC12
+
+    classDef actor fill:#ffffff,stroke:#111827,stroke-width:2px,color:#111827;
+    classDef usecase fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px,color:#111827;
+    class Owner,Requester,Courier actor;
+    class UC1,UC2,UC3,UC4,UC5,UC6,UC7,UC8,UC9,UC10,UC11,UC12 usecase;
+    style System fill:#f8fafc,stroke:#334155,stroke-width:2px,color:#111827
