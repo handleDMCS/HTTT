@@ -52,6 +52,7 @@ export type ChatMessage = {
 	message_id: number;
 	user_id: number;
 	user_name: string;
+	user_avatar_path: string;
 	transaction_id: number;
 	message: string;
 	applied_role: 'owner' | 'requester' | 'courier';

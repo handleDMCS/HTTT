@@ -918,24 +918,33 @@
 						<div class="message-list" bind:this={messageListElement}>
 							{#each chatMessages as message}
 								{@const MessageRoleIcon = roleIcon(message.applied_role)}
+								{@const messageAvatarUrl = mediaUrl(message.user_avatar_path)}
 								<article
 									class:mine={message.user_id === member?.id}
 									class="message-bubble"
 									data-message-id={message.message_id}
 								>
-									<strong>
-										<button class="inline-link" type="button" onclick={() => openProfile(message.user_id)}>
-											{message.user_name}
-										</button>
-										<span class="role-label">
-											<MessageRoleIcon size={15} />
-											{roleLabel(message.applied_role)}
-										</span>
-									</strong>
-									<time class="message-time" datetime={message.timestamp}>
-										{formatTimestamp(message.timestamp)}
-									</time>
-									<p>{message.message}</p>
+									<div class="message-copy">
+										<strong>
+											<button class="inline-link" type="button" onclick={() => openProfile(message.user_id)}>
+												{message.user_name}
+											</button>
+											<span class="role-label">
+												<MessageRoleIcon size={15} />
+												{roleLabel(message.applied_role)}
+											</span>
+										</strong>
+										<time class="message-time" datetime={message.timestamp}>
+											{formatTimestamp(message.timestamp)}
+										</time>
+										<p>{message.message}</p>
+									</div>
+									<img
+										class="message-avatar"
+										src={messageAvatarUrl}
+										alt={`${message.user_name} avatar`}
+										loading="lazy"
+									/>
 								</article>
 							{:else}
 								<p class="empty-state">No chat messages yet.</p>
@@ -960,8 +969,9 @@
 						<div class="pending-list" bind:this={pendingListElement}>
 							{#each notificationMessages as message}
 								{@const PendingRoleIcon = roleIcon(message.applied_role)}
+								{@const messageAvatarUrl = mediaUrl(message.user_avatar_path)}
 								<article class="pending-card" data-message-id={message.message_id}>
-									<div>
+									<div class="pending-copy">
 										<p class="eyebrow role-label">
 											<PendingRoleIcon size={15} />
 											{notificationLabel(message)}
@@ -983,6 +993,12 @@
 											<p class="muted">Approved.</p>
 										{/if}
 									</div>
+									<img
+										class="message-avatar"
+										src={messageAvatarUrl}
+										alt={`${message.user_name} avatar`}
+										loading="lazy"
+									/>
 									{#if isConfirmNotification(message) && !message.accepted && message.approver_role}
 										<div
 											class:expired={confirmCountdownRemaining(message) <= 0}

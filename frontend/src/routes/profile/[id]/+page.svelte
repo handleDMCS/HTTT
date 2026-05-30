@@ -165,6 +165,18 @@
 							saveProfile();
 						}}
 					>
+						<div class="profile-edit-actions">
+							<button class="primary-action" disabled={saving} type="submit">
+								{#if !saving}
+									<Save size={18} class="inline"/>
+								{/if}
+								{saving ? 'Saving...' : 'Save changes'}
+							</button>
+							<button class="ghost-button icon-label" disabled={saving} type="button" onclick={cancelEditing}>
+								<X size={18} />
+								Cancel
+							</button>
+						</div>
 						<label>
 							Name
 							<input bind:value={name} required autocomplete="name" />
@@ -197,18 +209,6 @@
 						{#if error}
 							<p class="form-error">{error}</p>
 						{/if}
-						<div class="profile-edit-actions">
-							<button class="primary-action" disabled={saving} type="submit">
-								{#if !saving}
-									<Save size={18} class="inline"/>
-								{/if}
-								{saving ? 'Saving...' : 'Save changes'}
-							</button>
-							<button class="ghost-button icon-label" disabled={saving} type="button" onclick={cancelEditing}>
-								<X size={18} />
-								Cancel
-							</button>
-						</div>
 					</form>
 				{/if}
 			</div>

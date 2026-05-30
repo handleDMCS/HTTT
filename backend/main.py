@@ -1156,6 +1156,7 @@ def message_to_dict(message: Message, member: Member) -> dict:
         "message_id": message.message_id,
         "user_id": message.user_id,
         "user_name": member.name,
+        "user_avatar_path": member.avatar_path,
         "transaction_id": message.transaction_id,
         "message": message.message,
         "applied_role": message.applied_role,

@@ -1191,9 +1191,7 @@ textarea:focus {
 
 .detail-tabs button:hover:not(:disabled),
 .detail-tabs button:focus-visible:not(:disabled) {
-	border-color: #d97757;
 	box-shadow: var(--focus-ring);
-	color: #d97757;
 	outline: none;
 	transform: translateY(-1px);
 }
@@ -1338,6 +1336,10 @@ textarea:focus {
 }
 
 .message-bubble {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 72px;
+	align-items: center;
+	gap: 14px;
 	width: min(82%, 540px);
 }
 
@@ -1350,6 +1352,20 @@ textarea:focus {
 .message-bubble strong {
 	display: block;
 	margin-bottom: 6px;
+}
+
+.message-copy,
+.pending-copy {
+	min-width: 0;
+}
+
+.message-avatar {
+	width: 72px;
+	aspect-ratio: 1;
+	border: 1px solid #e5ddd9;
+	border-radius: 4px;
+	background: #ffffff;
+	object-fit: cover;
 }
 
 .message-bubble .role-label,
@@ -1388,7 +1404,12 @@ textarea:focus {
 	align-items: center;
 	justify-content: space-between;
 	gap: 18px;
+	flex-wrap: wrap;
 	background: #ffffff;
+}
+
+.pending-copy {
+	flex: 1 1 260px;
 }
 
 .countdown-circle {
@@ -1682,6 +1703,11 @@ textarea:focus {
 	}
 
 	.message-bubble {
+		grid-template-columns: minmax(0, 1fr) 52px;
 		width: 100%;
+	}
+
+	.message-avatar {
+		width: 52px;
 	}
 }
