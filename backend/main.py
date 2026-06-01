@@ -3,6 +3,8 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
 from sqlmodel import Field, SQLModel, Session, create_engine, select
 
 
@@ -13,14 +15,13 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 class Member(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
-    contact: str
+    email: str
     points: int = 20
-    is_courier: bool = False
 
 
 class MemberCreate(SQLModel):
     name: str
-    contact: str
+    email: str
 
 
 class Book(SQLModel, table=True):
@@ -51,7 +52,6 @@ class ExchangeTransaction(SQLModel, table=True):
     owner_id: int = Field(foreign_key="member.id")
     requester_id: int = Field(foreign_key="member.id")
     exchange_mode: str
-    delivery_mode: str = "direct"
     courier_id: Optional[int] = Field(default=None, foreign_key="member.id")
     note: str = ""
     owner_confirmed: bool = False
@@ -63,7 +63,6 @@ class ExchangeTransaction(SQLModel, table=True):
 class TransactionCreate(SQLModel):
     book_id: int
     requester_id: int
-    delivery_mode: str = "direct"
     courier_id: Optional[int] = None
     note: str = ""
 
@@ -127,6 +126,129 @@ def get_transaction(session: Session, transaction_id: int) -> ExchangeTransactio
     return transaction
 
 
+def get_courier_member_ids(session: Session) -> set[int]:
+    """
+    tl;dr: Return members who have been assigned as couriers in transactions.
+    input:
+    * session: active database session
+    output:
+    * set of member ids used as transaction couriers
+    """
+    courier_ids = session.exec(select(ExchangeTransaction.courier_id)).all()
+    return {courier_id for courier_id in courier_ids if courier_id is not None}
+
+
+def member_to_dict(member: Member, courier_member_ids: set[int]) -> dict:
+    """
+    tl;dr: Convert a member into a frontend-friendly dictionary with derived courier status.
+    input:
+    * member: Member database record
+    * courier_member_ids: member ids used as transaction couriers
+    output:
+    * dictionary with member fields and derived courier status
+    """
+    return {
+        "id": member.id,
+        "name": member.name,
+        "email": member.email,
+        "points": member.points,
+        "is_courier": member.id in courier_member_ids,
+    }
+
+
+def get_table_columns(connection: Connection, table_name: str) -> set[str]:
+    """
+    tl;dr: Return the column names currently present in a database table.
+    input:
+    * connection: active database connection
+    * table_name: table to inspect
+    output:
+    * set of column names in the table
+    """
+    rows = connection.exec_driver_sql(f"PRAGMA table_info({table_name})").mappings().all()
+    return {row["name"] for row in rows}
+
+
+def migrate_schema() -> None:
+    """
+    tl;dr: Apply small schema updates for older prototype databases.
+    output:
+    * None
+    """
+    with engine.begin() as connection:
+        member_columns = get_table_columns(connection, "member")
+        if "contact" in member_columns and "email" not in member_columns:
+            connection.execute(text("ALTER TABLE member ADD COLUMN email VARCHAR NOT NULL DEFAULT ''"))
+            connection.execute(text("UPDATE member SET email = contact WHERE email IS NULL OR email = ''"))
+        elif "contact" in member_columns and "email" in member_columns:
+            connection.execute(text("UPDATE member SET email = contact WHERE email IS NULL OR email = ''"))
+        if "contact" in member_columns:
+            connection.execute(text("ALTER TABLE member DROP COLUMN contact"))
+
+        transaction_columns = get_table_columns(connection, "exchangetransaction")
+        if "delivery_mode" not in transaction_columns:
+            return
+
+        connection.execute(text("ALTER TABLE exchangetransaction RENAME TO exchangetransaction_old"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE exchangetransaction (
+                    id INTEGER NOT NULL,
+                    book_id INTEGER NOT NULL,
+                    owner_id INTEGER NOT NULL,
+                    requester_id INTEGER NOT NULL,
+                    exchange_mode VARCHAR NOT NULL,
+                    courier_id INTEGER,
+                    note VARCHAR NOT NULL,
+                    owner_confirmed BOOLEAN NOT NULL,
+                    requester_confirmed BOOLEAN NOT NULL,
+                    status VARCHAR NOT NULL,
+                    points_applied BOOLEAN NOT NULL,
+                    PRIMARY KEY (id),
+                    FOREIGN KEY(book_id) REFERENCES book (id),
+                    FOREIGN KEY(owner_id) REFERENCES member (id),
+                    FOREIGN KEY(requester_id) REFERENCES member (id),
+                    FOREIGN KEY(courier_id) REFERENCES member (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO exchangetransaction (
+                    id,
+                    book_id,
+                    owner_id,
+                    requester_id,
+                    exchange_mode,
+                    courier_id,
+                    note,
+                    owner_confirmed,
+                    requester_confirmed,
+                    status,
+                    points_applied
+                )
+                SELECT
+                    id,
+                    book_id,
+                    owner_id,
+                    requester_id,
+                    exchange_mode,
+                    courier_id,
+                    note,
+                    owner_confirmed,
+                    requester_confirmed,
+                    status,
+                    points_applied
+                FROM exchangetransaction_old
+                """
+            )
+        )
+        connection.execute(text("DROP TABLE exchangetransaction_old"))
+
+
 def points_for_mode(exchange_mode: str) -> int:
     """
     tl;dr: Return the point value for an exchange mode.
@@ -155,7 +277,7 @@ def book_to_dict(book: Book, owner: Member) -> dict:
         "id": book.id,
         "owner_id": book.owner_id,
         "owner_name": owner.name,
-        "owner_contact": owner.contact,
+        "owner_email": owner.email,
         "title": book.title,
         "genre": book.genre,
         "author": book.author,
@@ -194,7 +316,6 @@ def transaction_to_dict(
         "requester_id": transaction.requester_id,
         "requester_name": requester.name,
         "exchange_mode": transaction.exchange_mode,
-        "delivery_mode": transaction.delivery_mode,
         "courier_id": transaction.courier_id,
         "courier_name": courier.name if courier else "",
         "note": transaction.note,
@@ -243,11 +364,12 @@ def complete_transaction_if_ready(session: Session, transaction: ExchangeTransac
 @app.on_event("startup")
 def on_startup() -> None:
     """
-    tl;dr: Create all DB tables on startup if they do not exist yet.
+    tl;dr: Create all DB tables and apply small schema updates on startup.
     output:
     * None
     """
     SQLModel.metadata.create_all(engine)
+    migrate_schema()
 
 
 @app.get("/api/health")
@@ -261,55 +383,39 @@ def health() -> dict:
 
 
 @app.get("/api/members")
-def list_members() -> list[Member]:
+def list_members() -> list[dict]:
     """
     tl;dr: Return all registered members.
     output:
     * list of Member records
     """
     with Session(engine) as session:
-        return session.exec(select(Member).order_by(Member.id)).all()
+        members = session.exec(select(Member).order_by(Member.id)).all()
+        courier_member_ids = get_courier_member_ids(session)
+        return [member_to_dict(member, courier_member_ids) for member in members]
 
 
 @app.post("/api/members")
-def create_member(member: MemberCreate) -> Member:
+def create_member(member: MemberCreate) -> dict:
     """
     tl;dr: Register a new exchange member with 20 starting points.
     input:
-    * member: member name and contact details
+    * member: member name and email address
     output:
     * created Member record
     """
     with Session(engine) as session:
-        new_member = Member(name=member.name, contact=member.contact, points=20)
+        new_member = Member(name=member.name, email=member.email, points=20)
         session.add(new_member)
         session.commit()
         session.refresh(new_member)
-        return new_member
-
-
-@app.post("/api/members/{member_id}/courier")
-def register_courier(member_id: int) -> Member:
-    """
-    tl;dr: Mark an existing member as a free courier.
-    input:
-    * member_id: id of the member volunteering for deliveries
-    output:
-    * updated Member record
-    """
-    with Session(engine) as session:
-        member = get_member(session, member_id)
-        member.is_courier = True
-        session.add(member)
-        session.commit()
-        session.refresh(member)
-        return member
+        return member_to_dict(new_member, set())
 
 
 @app.get("/api/books")
 def list_books() -> list[dict]:
     """
-    tl;dr: Return all books with owner names and contact details.
+    tl;dr: Return all books with owner names and email addresses.
     output:
     * list of dictionaries describing books and owners
     """
@@ -369,7 +475,7 @@ def create_transaction(payload: TransactionCreate) -> dict:
     """
     tl;dr: Create a pending exchange request for an available book.
     input:
-    * payload: requested book, requester, delivery choice, optional courier, and note
+    * payload: requested book, requester, optional courier, and note
     output:
     * created transaction dictionary
     """
@@ -383,17 +489,9 @@ def create_transaction(payload: TransactionCreate) -> dict:
         if owner.id == requester.id:
             raise HTTPException(status_code=400, detail="Requester cannot be the book owner")
 
-        delivery_mode = payload.delivery_mode
-        if delivery_mode not in {"direct", "courier"}:
-            raise HTTPException(status_code=400, detail="delivery_mode must be direct or courier")
-
         courier = None
-        if delivery_mode == "courier":
-            if not payload.courier_id:
-                raise HTTPException(status_code=400, detail="Choose a courier for courier delivery")
+        if payload.courier_id is not None:
             courier = get_member(session, payload.courier_id)
-            if not courier.is_courier:
-                raise HTTPException(status_code=400, detail="Selected member is not a courier")
             if courier.id in {owner.id, requester.id}:
                 raise HTTPException(status_code=400, detail="Courier must be a third member")
 
@@ -402,7 +500,6 @@ def create_transaction(payload: TransactionCreate) -> dict:
             owner_id=owner.id,
             requester_id=requester.id,
             exchange_mode=book.exchange_mode,
-            delivery_mode=delivery_mode,
             courier_id=courier.id if courier else None,
             note=payload.note,
         )
@@ -458,16 +555,17 @@ def demo_seed() -> dict:
         if existing:
             return {"created": False, "message": "Demo data already exists"}
 
-        an = Member(name="An", contact="an@example.com", points=20)
-        binh = Member(name="Binh", contact="binh@example.com", points=20, is_courier=True)
-        chi = Member(name="Chi", contact="chi@example.com", points=20)
-        session.add(an)
-        session.add(binh)
-        session.add(chi)
+        an = Member(name="An", email="an@example.com", points=20)
+        binh = Member(name="Binh", email="binh@example.com", points=20)
+        chi = Member(name="Chi", email="chi@example.com", points=20)
+        dung = Member(name="Dung", email="dung@example.com", points=20)
+        giang = Member(name="Giang", email="giang@example.com", points=20)
+        members = [an, binh, chi, dung, giang]
+        for member in members:
+            session.add(member)
         session.commit()
-        session.refresh(an)
-        session.refresh(binh)
-        session.refresh(chi)
+        for member in members:
+            session.refresh(member)
 
         books = [
             Book(
@@ -488,11 +586,35 @@ def demo_seed() -> dict:
                 condition="Used",
                 exchange_mode="permanent",
             ),
+            Book(
+                owner_id=giang.id,
+                title="Atomic Habits",
+                genre="Self-help",
+                author="James Clear",
+                publication_year=2018,
+                condition="Like new",
+                exchange_mode="loan",
+            ),
+            Book(
+                owner_id=binh.id,
+                title="The Hobbit",
+                genre="Fantasy",
+                author="J.R.R. Tolkien",
+                publication_year=1937,
+                condition="Good",
+                exchange_mode="permanent",
+            ),
+            Book(
+                owner_id=dung.id,
+                title="Dune",
+                genre="Science fiction",
+                author="Frank Herbert",
+                publication_year=1965,
+                condition="Fair",
+                exchange_mode="loan",
+            ),
         ]
         for book in books:
             session.add(book)
         session.commit()
         return {"created": True, "message": "Demo data created"}
-
-
-app.mount("/", StaticFiles(directory="../mock_frontend", html=True), name="frontend")

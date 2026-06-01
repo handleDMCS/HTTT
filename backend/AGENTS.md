@@ -1,7 +1,7 @@
 ---
 name: rapid-prototyping
 description: >
-  Opinionated stack for hackathons and time-boxed sprints: FastAPI + uv (single file) + SQLite via SQLModel for the backend, vanilla HTML/CSS/JS in ./mock_frontend/ for the frontend. Trigger on any time pressure or demo context — "just get it working", "we have X hours", "MVP by end of day".
+  Opinionated stack for hackathons and time-boxed sprints: FastAPI + uv (single file) + SQLite via SQLModel. Data is inspected via FastAPI's built-in /docs and sqlite-web. Trigger on any time pressure or demo context — "just get it working", "we have X hours", "MVP by end of day".
 ---
 
 # Rapid Prototyping Skill
@@ -12,19 +12,12 @@ You are helping build a **functional prototype in a 24-hour hackathon**. The onl
 
 ---
 
-## Project Idea
-
-Before implementing features, read `IDEA.md` to understand the project idea and intended direction.
-
----
-
 ## Stack (non-negotiable)
 
 | Layer    | Choice                          | Rationale                                  |
 |----------|---------------------------------|--------------------------------------------|
 | Backend  | **FastAPI** + **uv**            | Fast to write, fast to run, typed          |
 | Database | **SQLite** via **SQLModel**     | Zero config, file-based, ORM+schema in one |
-| Frontend | **Vanilla HTML + CSS + JS**     | Zero build step, instant iteration         |
 
 Do not suggest React, TypeScript, Docker, auth systems, or any other abstraction unless the user explicitly asks. Every added layer is a liability in a hackathon.
 
@@ -33,18 +26,14 @@ Do not suggest React, TypeScript, Docker, auth systems, or any other abstraction
 ## Project Structure
 
 ```
-HTTT/
-├── IDEA.md              # project idea, scope, and feature direction
-├── backend/
-│   ├── main.py          # entire backend: models, DB, routes
-│   ├── db.sqlite3       # auto-created on first run
-│   └── pyproject.toml
-└── mock_frontend/
-    ├── index.html       # main page
-    └── *.html           # one file per additional mock page
+backend/
+├── AGENTS.md
+├── main.py          # entire backend: models, DB, routes
+├── db.sqlite3       # auto-created on first run
+└── pyproject.toml
 ```
 
-Every file the user will edit lives at the top of one of these two directories. Nothing else.
+All code lives in `backend/`. Inspect data via `http://localhost:8000/docs` (FastAPI) and `sqlite_web db.sqlite3`.
 
 ---
 
@@ -71,9 +60,8 @@ For functions with no arguments (e.g. startup hooks), omit the `input` block. Fo
 **Minimal bootstrap:**
 ```bash
 mkdir my-project && cd my-project
-mkdir mock_frontend
 uv init backend && cd backend
-uv add fastapi uvicorn sqlmodel
+uv add fastapi uvicorn sqlmodel sqlite-web
 uv run uvicorn main:app --reload
 ```
 
@@ -81,7 +69,6 @@ uv run uvicorn main:app --reload
 ```python
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 from typing import Optional
 
@@ -137,67 +124,6 @@ def create_item(item: Item):
         session.refresh(item)
         return item
 
-# Mount frontend (keep last — catches all unmatched routes)
-app.mount("/", StaticFiles(directory="../mock_frontend", html=True), name="frontend")
-```
-
----
-
-## Frontend Rules
-
-- **Directory: `./mock_frontend/`** — all HTML files live here.
-- **One file per page/view** — no bundler, no framework, no npm.
-- **Bare-minimum UI**: a form, a list, a button. If it works, it's done. No animations, no responsiveness, no dark mode.
-- Fetch data from the FastAPI backend via `fetch("/api/...")`.
-- Inline `<style>` and `<script>` in each HTML file — no external `.css` or `.js` files unless there are more than ~100 lines of JS.
-
-**`mock_frontend/index.html` skeleton:**
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Demo</title>
-  <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; }
-    button { padding: 0.5rem 1rem; cursor: pointer; }
-    ul { padding: 0; list-style: none; }
-    li { padding: 0.4rem 0; border-bottom: 1px solid #eee; }
-  </style>
-</head>
-<body>
-  <h1>App Name</h1>
-
-  <form id="form">
-    <input id="input" placeholder="Enter something" required />
-    <button type="submit">Add</button>
-  </form>
-
-  <ul id="list"></ul>
-
-  <script>
-    async function load() {
-      const res = await fetch('/api/items');
-      const data = await res.json();
-      document.getElementById('list').innerHTML =
-        data.map(i => `<li>${i.name}</li>`).join('');
-    }
-
-    document.getElementById('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const val = document.getElementById('input').value;
-      await fetch('/api/items', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: val })
-      });
-      e.target.reset();
-      load();
-    });
-
-    load();
-  </script>
-</body>
-</html>
 ```
 
 ---
@@ -208,15 +134,17 @@ When the user describes a feature or app, produce:
 
 - [ ] `backend/main.py` — complete and runnable, all backend logic inside
 - [ ] `backend/pyproject.toml` — with all dependencies listed
-- [ ] `mock_frontend/index.html` — and any additional pages needed
-- [ ] A 3-line "How to run" block at the end of your response
+- [ ] A "How to run" block at the end of your response
 
 **How to run (template):**
 ```bash
 cd backend
 uv run uvicorn main:app --reload
-# Open http://localhost:8000
+# API explorer: http://localhost:8000/docs
+# DB browser:   uv run sqlite_web db.sqlite3
 ```
+
+**IMPORTANT**: The dev server is on http://localhost:8000/. If you can't invoke it, DON'T ATTEMPT TO SPIN UP A NEW ONE, ask me to do it for you.
 
 ---
 

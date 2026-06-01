@@ -1,1 +1,22 @@
-Câu lạc bộ đọc sách muốn xây dựng một ứng dụng kết nối các thành viên cho mục đích trao đổi sách. Sau khi đăng ký thành viên trao đổi sách, bạn được tặng 20 điểm và có thể cập nhật danh mục sách mình muốn trao đổi, gồm tên sách, thể loại, tên tác giả, năm xuất bản, tình trạng sách. Nếu không có sách để trao đổi, bạn có thể đăng ký làm người giao sách miễn phí để tích lũy 2 điểm thưởng cho mỗi lần giao sách thành công. Bạn có thể lựa chọn hình thức trao đổi sách không hoàn trả hoặc hình thức cho mượn có hoàn trả. Mỗi cuốn sách của bạn được trao đổi vĩnh viễn bạn được +10 điểm, cho mượn có hoàn trả được +5 điểm. Ngược lại khi nhận sách trao đổi vĩnh viễn bạn bị -10 điểm và khi mượn sách bạn bị -5 điểm. Các thành viên khi tìm thấy cuốn sách mong muốn, có thể trực tiếp liên hệ với đối tác để thỏa thuận cách thức giao nhận sách hoặc nhờ người giao sách miễn phí. Điểm số được cập nhật sau khi cả hai bên đã xác nhận giao dịch thành công.
+* A book club wants to build an app that connects members for the purpose of exchanging books.
+* After registering as a book-exchange member, each member receives **20 points**.
+* Members can update the list of books they want to exchange, including:
+
+  * Book title
+  * Genre
+  * Author name
+  * Year of publication
+  * Book condition
+* Members who do not have books to exchange can register as free book deliverers.
+* Free book deliverers earn **2 reward points** for each successful delivery.
+* Members can choose between two types of book exchange:
+
+  * Permanent exchange, with no return required
+  * Lending, where the book must be returned
+* For each book permanently exchanged by a member, they receive **+10 points**.
+* For each book lent with return required, they receive **+5 points**.
+* When a member receives a book through permanent exchange, they lose **10 points**.
+* When a member borrows a book, they lose **5 points**.
+* When members find a book they want, they can directly email the other member to agree on the delivery method.
+* Members can also request help from a free book deliverer.
+* Points are updated only after both parties confirm that the transaction was completed successfully.
