@@ -12,6 +12,12 @@ You are helping build a **functional prototype in a 24-hour hackathon**. The onl
 
 ---
 
+## Project Idea
+
+Before implementing features, read `IDEA.md` to understand the project idea and intended direction.
+
+---
+
 ## Stack (non-negotiable)
 
 | Layer    | Choice                          | Rationale                                  |
@@ -27,7 +33,8 @@ Do not suggest React, TypeScript, Docker, auth systems, or any other abstraction
 ## Project Structure
 
 ```
-my-project/
+HTTT/
+├── IDEA.md              # project idea, scope, and feature direction
 ├── backend/
 │   ├── main.py          # entire backend: models, DB, routes
 │   ├── db.sqlite3       # auto-created on first run
