@@ -41,7 +41,7 @@
 	<section class="auth-panel">
 		<div>
 			<p class="eyebrow">Book Exchange Club</p>
-			<h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+			<h1>{mode === 'login' ? 'Welcome back' : 'Register'}</h1>
 			<p class="muted">Track your books, accepted exchanges, and delivery chats from one shelf.</p>
 		</div>
 

@@ -66,6 +66,12 @@ button {
 	padding: 15px;
 }
 
+.auth-page {
+	min-height: calc(100vh - 150px);
+	align-items: start;
+	padding-top: 15px
+}
+
 .auth-panel,
 .form-shell,
 .detail-shell {
@@ -146,7 +152,6 @@ h2 {
 .icon-button:focus-visible {
 	border-color: #d97757;
 	box-shadow: var(--focus-ring);
-	color: #d97757;
 	outline: none;
 }
 
