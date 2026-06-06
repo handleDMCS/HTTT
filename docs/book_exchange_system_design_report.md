@@ -21,7 +21,7 @@ Bảng 0.1. Bảng thông tin thực hiện báo cáo
 
 | Họ và tên | Vai trò | Nhiệm vụ |
 | --- | --- | --- |
-| Nhóm phát triển HTTT | Business Analyst / Technical Writer | Phân tích nghiệp vụ, đặc tả yêu cầu, mô hình hóa hệ thống, lập báo cáo kỹ thuật |
+| Nhóm phát triển HTTT | Business Analyst / System Design Writer | Phân tích nghiệp vụ, đặc tả yêu cầu, mô hình hóa hệ thống, lập báo cáo thiết kế hệ thống |
 | Backend | FastAPI Developer | Xây dựng API, mô hình dữ liệu, nghiệp vụ điểm, xác nhận giao dịch trong `backend/main.py` |
 | Frontend | Svelte Developer | Xây dựng giao diện SvelteKit, luồng đăng nhập, quản lý sách, chatbox, thông báo và hồ sơ |
 

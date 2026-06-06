@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Book Exchange Club technical report artifacts."""
+"""Generate the Book Exchange Club system design report artifacts."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ ASSET_DIR = OUT_DIR / "report_assets"
 DIAGRAM_SRC_DIR = ASSET_DIR / "diagrams" / "src"
 DIAGRAM_RENDERED_DIR = ASSET_DIR / "diagrams" / "rendered"
 PNG_RENDERER = ASSET_DIR / "render_diagrams_png.ps1"
-REPORT_MD = OUT_DIR / "book_exchange_technical_report.md"
-REPORT_DOCX = OUT_DIR / "book_exchange_technical_report.docx"
+REPORT_MD = OUT_DIR / "book_exchange_system_design_report.md"
+REPORT_DOCX = OUT_DIR / "book_exchange_system_design_report.docx"
 REPORT_IMAGE_EXTENSION = "svg"
 
 
@@ -886,7 +886,7 @@ Bảng 0.1. Bảng thông tin thực hiện báo cáo
 
 | Họ và tên | Vai trò | Nhiệm vụ |
 | --- | --- | --- |
-| Nhóm phát triển HTTT | Business Analyst / Technical Writer | Phân tích nghiệp vụ, đặc tả yêu cầu, mô hình hóa hệ thống, lập báo cáo kỹ thuật |
+| Nhóm phát triển HTTT | Business Analyst / System Design Writer | Phân tích nghiệp vụ, đặc tả yêu cầu, mô hình hóa hệ thống, lập báo cáo thiết kế hệ thống |
 | Backend | FastAPI Developer | Xây dựng API, mô hình dữ liệu, nghiệp vụ điểm, xác nhận giao dịch trong `backend/main.py` |
 | Frontend | Svelte Developer | Xây dựng giao diện SvelteKit, luồng đăng nhập, quản lý sách, chatbox, thông báo và hồ sơ |
 
@@ -2362,7 +2362,7 @@ def core_xml() -> str:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>Technical Report - Book Exchange Club</dc:title>
+  <dc:title>System Design Report - Book Exchange Club</dc:title>
   <dc:creator>Codex</dc:creator>
   <cp:lastModifiedBy>Codex</cp:lastModifiedBy>
   <dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created>
