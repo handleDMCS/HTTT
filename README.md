@@ -2,9 +2,9 @@
 
 Repository này chứa mã nguồn, slide, báo cáo thiết kế hệ thống và video demo cho đề tài xây dựng ứng dụng kết nối thành viên câu lạc bộ sách để trao đổi hoặc cho mượn sách.
 
-## Lưu ý gửi giảng viên về đóng góp thành viên
+## Kính gửi cô - Đóng góp của từng thành viên vào dự án
 
-Kính gửi thầy/cô,
+Kính gửi cô,
 
 Em là Trương Tuấn Dũng, mã sinh viên 21020058. Trong suốt quá trình thực hiện dự án này, em là người đảm nhiệm 100% khối lượng công việc, bao gồm phân tích yêu cầu, thiết kế hệ thống, xây dựng backend, xây dựng frontend, chuẩn bị dữ liệu demo, viết báo cáo, làm slide, quay video demo và hoàn thiện repository nộp bài.
 
