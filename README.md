@@ -19,7 +19,7 @@ Em ghi rõ phần này ở đầu README để thầy/cô có thông tin trực 
 | Source code backend | `backend/main.py` | FastAPI + SQLModel + SQLite, toàn bộ model, API, auth, chatbox, notification, điểm và seed demo nằm trong một file |
 | Source code frontend | `frontend/` | SvelteKit 5 + TypeScript + Vite, giao diện đăng nhập, danh sách sách, chi tiết sách, chatbox, notification, profile và archive |
 | Slide thuyết trình | `slide/presentation.html` | Slide HTML có các ảnh chụp màn hình dự án thật trong `slide/screenshots/` |
-| Báo cáo thiết kế hệ thống | `docs/book_exchange_system_design_report.docx` và `docs/book_exchange_system_design_report.md` | Tài liệu phân tích thiết kế hệ thống, DFD, ERD, API, UI/UX, test và triển khai |
+| Báo cáo thiết kế hệ thống | `docs/book_exchange_system_design_report.docx`| Tài liệu phân tích thiết kế hệ thống, DFD, ERD, API, UI/UX, test và triển khai |
 | Video demo | `demo.mp4` | Video minh họa luồng sử dụng chính của prototype |
 
 ## Clone repository
@@ -36,7 +36,6 @@ Sau khi clone repository về máy:
 - Slide: mở file `slide/presentation.html` bằng trình duyệt.
 - Ảnh dùng trong slide: nằm trong thư mục `slide/screenshots/`.
 - Báo cáo thiết kế hệ thống: mở file `docs/book_exchange_system_design_report.docx`.
-- Bản Markdown của báo cáo: `docs/book_exchange_system_design_report.md`.
 - Video demo: mở file `demo.mp4` bằng trình phát video.
 - Source code backend: `backend/main.py`.
 - Source code frontend: thư mục `frontend/`.
